@@ -1,0 +1,9 @@
+# ignore folder name 'data'
+data/
+result.txt
+.DS_Store
+*.ipynb
+GoogleNews-vectors-negative300.bin.gz
+GoogleNews-vectors-negative300.bin
+glove.6B.100d.txt
+glove.6B.100d.txt.word2vec
