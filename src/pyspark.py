@@ -1,3 +1,4 @@
+
 from collections import Counter
 import logging
 from gensim.models.keyedvectors import KeyedVectors
@@ -27,6 +28,7 @@ from itertools import combinations
 # nltk.download("stopwords")
 warnings.filterwarnings("ignore")
 
+# Start
 sc = SparkContext()
 spark = SparkSession(sc)
 df = spark.read.parquet(
@@ -34,7 +36,7 @@ df = spark.read.parquet(
 print("*"*50)
 print('start')
 
-
+# Load word2vec model
 now = datetime.datetime.now()
 print('loading model')
 model = KeyedVectors.load_word2vec_format(
@@ -43,15 +45,20 @@ print('model loading time')
 print(str(datetime.datetime.now()-now) + 'sec')
 model_broadcast = sc.broadcast(model)
 
+# Preload stop words
 stop = set(stopwords.words('english'))
 
 
 def text_cleaning(sentence, stop=stop):
-    if len(sentence) < 1:
-        return False
+    """
+    Remove the punctuation & stop words
+    sentence - str type 
+    return list of proccessed str
+    """
+    # if len(sentence) < 1:
+    #     return False
     lemmatizer = WordNetLemmatizer()
     sentence = sentence.lower()
-    # nonetype has no lower()
     cleanr = re.compile('<.*?>')
     sentence = re.sub(cleanr, ' ', sentence)
     sentence = re.sub(r'[?|!|\'|"|#]', r'', sentence)
@@ -63,8 +70,13 @@ def text_cleaning(sentence, stop=stop):
 
 
 def get_word2vec(sentence):
-    if len(sentence) < 1:
-        return False
+    """
+    project each word to 50 dimention vector
+    sentence - a list of string type 
+    return a list of vector 
+    """
+    # if len(sentence) < 1:
+    #     return False
     vec_ = []
     for idx in range(len(sentence)):
         tmp = sentence[idx]
@@ -77,6 +89,11 @@ def get_word2vec(sentence):
 
 
 def get_tf(sentence):
+    """
+    calculate the weight of each word in the sentence by pretrained tfidf
+    sentence - a list of string type 
+    return a list of scaler 
+    """
     tf_ = []
     for idx in range(len(sentence)):
         w = sentence[idx]
@@ -87,18 +104,24 @@ def get_tf(sentence):
 
 
 def sentence_embeded(sentence):
+    """
+    multipy word vectors with the weight(scaler)
+    sentence - a list of string type 
+    return a vector
+    """
     weight = get_tf(sentence)
     word_vector = get_word2vec(sentence)
     weighted_sentence = [x * y for x, y in zip(weight, word_vector)]
     embeded_sentence = sum(weighted_sentence)
-    return list(embeded_sentence)
+    return (embeded_sentence)
 
 
 test = df.select('customer_id', 'review_body')
 test2 = test.rdd.map(lambda x: (x[0], str(x[1])))
 test3 = test2.map(lambda x: (x[0], text_cleaning(x[1])))
-test4 = test3.filter(lambda x: len(x[1]) > 0)  # rule out empty
+test4 = test3.filter(lambda x: len(x[1]) > 0)
 test5 = test4.map(lambda x: (x[0], ([sentence_embeded(x[1])], [len(x[1])], 1)))
+# reduceby userid
 test6 = test5.reduceByKey(lambda a, b: (a[0]+b[0], a[1]+b[1], a[2]+a[2]))
 
 
@@ -106,6 +129,7 @@ def calculate_similarity(ls):
     """
     ls - a list of vec
     each vec is a numpy array
+    return a list of similarity of pair of reviews
     """
     result = []
     for i in combinations(ls, 2):
@@ -116,7 +140,7 @@ def calculate_similarity(ls):
 
 
 test7 = test6.map(lambda x: (
-    x[0], (x[1][0], calculate_similarity(x[1][0]), x[1][2])))
+    x[0], x[1][0], calculate_similarity(x[1][0]), x[1][2]))
 
 
 def vote(sim, count):
@@ -130,37 +154,39 @@ def vote(sim, count):
 
 
 test8 = test7.map(lambda x: (
-    x[0], (x[1][0], x[1][2], vote(x[1][1], x[1][2]))))
+    x[0], x[1],  vote(x[2], x[3]), x[3]))
+
+# still need to write in the cassandra
 
 
 # if(config.LOG_DEBUG):
 #    print(colored("[PROCESSING]: Cleaning question body...", "green"))
-clean_text = udf(lambda text: text_cleaning(text), StringType())
-text_cleaned = df.withColumn("cleaned_text", clean_text("review_body"))
+# clean_text = udf(lambda text: text_cleaning(text), StringType())
+# text_cleaned = df.withColumn("cleaned_text", clean_text("review_body"))
 
-len_text = udf(lambda ls: len(ls), IntegerType())
-proccessed_df = text_cleaned.withColumn(
-    "text_length", len_text("cleaned_text"))
+# len_text = udf(lambda ls: len(ls), IntegerType())
+# proccessed_df = text_cleaned.withColumn(
+#     "text_length", len_text("cleaned_text"))
 
 # sen_embeded = udf(lambda ls: sentence_embeded(ls), StringType())
 # embeded_df  = proccessed_df.withColumn("sen_vec", sen_embeded("cleaned_text"))
 
 
-tf_try = udf(lambda ls: get_tf(ls), StringType())
-tf_df = proccessed_df.withColumn("tf_vec", tf_try("cleaned_text"))
+# tf_try = udf(lambda ls: get_tf(ls), StringType())
+# tf_df = proccessed_df.withColumn("tf_vec", tf_try("cleaned_text"))
 
-word2vec_try = udf(lambda ls: get_word2vec(ls), ArrayType(FloatType()))
-word2vec_df = proccessed_df.withColumn(
-    "word2vec", word2vec_try("cleaned_text"))
-
-
-df2 = proccessed_df.select('customer_id', 'text_length', 'cleaned_text')
+# word2vec_try = udf(lambda ls: get_word2vec(ls), ArrayType(FloatType()))
+# word2vec_df = proccessed_df.withColumn(
+#     "word2vec", word2vec_try("cleaned_text"))
 
 
-def reduce_by_user(a, b):
-    result = [a, b]
-    return result
+# df2 = proccessed_df.select('customer_id', 'text_length', 'cleaned_text')
 
 
-df3 = df2.rdd.map(lambda x: (x[0], (x[1], x[2])))
-df3.reduceByKey(reduce_by_user).take(1)
+# def reduce_by_user(a, b):
+#     result = [a, b]
+#     return result
+
+
+# df3 = df2.rdd.map(lambda x: (x[0], (x[1], x[2])))
+# df3.reduceByKey(reduce_by_user).take(1)
