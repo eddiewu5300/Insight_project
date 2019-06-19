@@ -5,14 +5,12 @@ from pyspark.sql import SQLContext
 from pyspark.sql.functions import lit
 from pyspark import SparkContext
 import os
-from cassandra.cluster import Cluster
-cluster = Cluster(['127.0.0.1'], port=9042)
-session = cluster.connect('test')
+# from cassandra.cluster import Cluster
+# cluster = Cluster(['127.0.0.1'], port=9042)
+# session = cluster.connect('test')
 
 # Unknown if this needs to run everytime we call this...
-# os.environ['PYSPARK_SUBMIT_ARGS'] = '--packages com.datastax.spark:spark-cassandra-connector_2.11:2.3.0 --conf spark.cassandra.connection.host=10.0.0.10 pyspark-shell'
-
-
+# os.environ['PYSPARK_SUBMIT_ARGS'] = '--packages com.datastax.spark:spark-cassandra-connector_2.11:2.3.2 --conf spark.cassandra.connection.host=10.0.0.13 pyspark-shell'
 sc = SparkContext("local", "spark_test")
 
 # Creating PySpark SQL Context
@@ -47,4 +45,6 @@ minutes.write\
     .options(table="avgs", keyspace="test")\
     .save()
 
+
+# ALTER KEYSPACE test WITH REPLICATION = {'class' : 'NetworkTopologyStrategy', 'datacenter1' : 1}
 # Not enough replicas available for query at consistency LOCAL_QUORUM (2 required but only 1 alive)

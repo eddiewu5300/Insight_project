@@ -1,4 +1,10 @@
-
+# pyspark --conf spark.cassandra.connection.host="10.0.0.13" --master spark://ip-10-0-0-11:7077 --conf spark.executor.memoryOverhead=600 --executor-memory 6G --driver-memory 6G
+# spark-submit --conf spark.cassandra.connection.host="10.0.0.13" --master spark://ip-10-0-0-11:7077 --conf spark.executor.memoryOverhead=600 --executor-memory 6G --driver-memory 6G spark_job.py
+from pyspark.sql.types import *
+from pyspark.sql import SQLContext
+from pyspark import SparkContext
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import udf, concat, col, lit
 from collections import Counter
 import logging
 from gensim.models.keyedvectors import KeyedVectors
@@ -11,21 +17,17 @@ import nltk
 from sklearn.metrics.pairwise import cosine_similarity
 import math
 import wikiwords
-import config
-from pyspark import SparkContext
-from pyspark.sql import SparkSession
+#import config
 import datetime
-from pyspark.sql.types import ArrayType, StringType, FloatType, IntegerType
-from pyspark.sql.functions import udf, concat, col, lit
 import sys
 import os
 import re
 import time
 import numpy as np
-from termcolor import colored
+# from termcolor import colored
 from itertools import combinations
-# nltk.download("wordnet")
-# nltk.download("stopwords")
+nltk.download("wordnet")
+nltk.download("stopwords")
 warnings.filterwarnings("ignore")
 
 # Start
@@ -117,11 +119,19 @@ def sentence_embeded(sentence):
 
 
 test = df.select('customer_id', 'review_body')
+
+print("*"*50)
+print('convert to string')
 test2 = test.rdd.map(lambda x: (x[0], str(x[1])))
+
 test3 = test2.map(lambda x: (x[0], text_cleaning(x[1])))
+
 test4 = test3.filter(lambda x: len(x[1]) > 0)
 test5 = test4.map(lambda x: (x[0], ([sentence_embeded(x[1])], [len(x[1])], 1)))
+
 # reduceby userid
+print("*"*50)
+print('reduce by user')
 test6 = test5.reduceByKey(lambda a, b: (a[0]+b[0], a[1]+b[1], a[2]+a[2]))
 
 
@@ -139,8 +149,10 @@ def calculate_similarity(ls):
     return result
 
 
+print("*"*50)
+print('similarity calculation')
 test7 = test6.map(lambda x: (
-    x[0], x[1][0], calculate_similarity(x[1][0]), x[1][2]))
+    x[0], [x.tolist() for x in x[1][0]], calculate_similarity(x[1][0]), x[1][2]))
 
 
 def vote(sim, count):
@@ -153,10 +165,48 @@ def vote(sim, count):
         return False
 
 
+print("*"*50)
+print('detect fake account')
 test8 = test7.map(lambda x: (
-    x[0], x[1],  vote(x[2], x[3]), x[3]))
+    (x[0]), int(x[3]), vote(x[2], x[3]), x[1]))
+#rdd = test8.collect()
 
-# still need to write in the cassandra
+
+# schema = StructType(
+#     [
+#         StructField("user_id", StringType(), True),
+#         StructField("count", IntegerType(), True),
+#         StructField("fake", BooleanType(), True),
+#         StructField("reveiw", ArrayType(
+#             StructType([
+#                 StructField("vector", ArrayType(FloatType()), True)
+#             ])
+#         ), True)
+#     ])
+
+# StructType(List(StructField(user_id,StringType,true)\
+# ,StructField(count,IntegerType,true),StructField(fake,BooleanType,true)\
+# ,StructField(reveiw,ArrayType(ArrayType(FloatType,true),true),true)))
+
+
+schema = StructType(
+    [
+        StructField("user_id", StringType(), True),
+        StructField("count", IntegerType(), True),
+        StructField("fake", BooleanType(), True),
+        StructField("review", ArrayType(ArrayType(FloatType())), True)
+    ])
+
+sqlContext = SQLContext(sc)
+df2 = sqlContext.createDataFrame(test8, schema)
+df2.show(3)
+os.environ['PYSPARK_SUBMIT_ARGS'] = '--packages \
+    com.datastax.spark:spark-cassandra-connector_2.11:2.3.2 \
+        --conf spark.cassandra.connection.host=10.0.0.13 pyspark-shell'
+df2.write.format("org.apache.spark.sql.cassandra")\
+    .mode('append')\
+    .options(table="user_reviews", keyspace="project")\
+    .save()
 
 
 # if(config.LOG_DEBUG):
