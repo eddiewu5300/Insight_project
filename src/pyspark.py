@@ -26,17 +26,16 @@ import time
 import numpy as np
 # from termcolor import colored
 from itertools import combinations
-nltk.download("wordnet")
-nltk.download("stopwords")
+# nltk.download("wordnet")
+# nltk.download("stopwords")
 warnings.filterwarnings("ignore")
 
 # Start
 sc = SparkContext()
 spark = SparkSession(sc)
 df = spark.read.parquet(
-    's3a://amazondata/parquet/product_category=Apparel/part-00000-495c48e6-96d6-4650-aa65-3c36a3516ddd.c000.snappy.parquet')
-print("*"*50)
-print('start')
+    's3a://amazondata/parquet/product_category=Apparel/*.parquet')
+
 
 # Load word2vec model
 now = datetime.datetime.now()
@@ -57,8 +56,6 @@ def text_cleaning(sentence, stop=stop):
     sentence - str type 
     return list of proccessed str
     """
-    # if len(sentence) < 1:
-    #     return False
     lemmatizer = WordNetLemmatizer()
     sentence = sentence.lower()
     cleanr = re.compile('<.*?>')
@@ -77,8 +74,6 @@ def get_word2vec(sentence):
     sentence - a list of string type 
     return a list of vector 
     """
-    # if len(sentence) < 1:
-    #     return False
     vec_ = []
     for idx in range(len(sentence)):
         tmp = sentence[idx]
@@ -86,6 +81,7 @@ def get_word2vec(sentence):
             vec = model.wv[tmp]
         except:
             vec = np.repeat(0.0, 50)
+        # vec_.append(np.round(vec, 5))
         vec_.append(vec)
     return vec_
 
@@ -118,21 +114,35 @@ def sentence_embeded(sentence):
     return (embeded_sentence)
 
 
+print('#'*100)
+print('start')
 test = df.select('customer_id', 'review_body')
+test2 = test.rdd.map(
+    lambda x: (x[0], str(x[1])))
 
-print("*"*50)
-print('convert to string')
-test2 = test.rdd.map(lambda x: (x[0], str(x[1])))
+print('#'*100)
+print('text cleaning')
+test3 = test2.map(
+    lambda x: (x[0], text_cleaning(x[1])))
 
-test3 = test2.map(lambda x: (x[0], text_cleaning(x[1])))
+print('#'*100)
+print('filtering')
+test4 = test3.filter(
+    lambda x: len(x[1]) > 0)
 
-test4 = test3.filter(lambda x: len(x[1]) > 0)
-test5 = test4.map(lambda x: (x[0], ([sentence_embeded(x[1])], [len(x[1])], 1)))
+
+print('#'*100)
+print('sentence embedding')
+# Row((id, (sentence vectors, len(sentence), 1)
+test5 = test4.map(
+    lambda x: (x[0], ([sentence_embeded(x[1])], [len(x[1])], 1)))
 
 # reduceby userid
-print("*"*50)
-print('reduce by user')
-test6 = test5.reduceByKey(lambda a, b: (a[0]+b[0], a[1]+b[1], a[2]+a[2]))
+print('#'*100)
+print('reducing')
+# Row((id, (list(sentence vectors), list(len(sentence)), count)
+test6 = test5.reduceByKey(
+    lambda a, b: (a[0]+b[0], a[1]+b[1], a[2]+a[2]))
 
 
 def calculate_similarity(ls):
@@ -145,31 +155,37 @@ def calculate_similarity(ls):
     for i in combinations(ls, 2):
         sim = (cosine_similarity(i[0].reshape(1, -1), i[1].reshape(1, -1)))
         sim = round(sim[0][0], 2)
-        result.append(sim)
+        result.append(float(sim))
     return result
 
 
-print("*"*50)
-print('similarity calculation')
-test7 = test6.map(lambda x: (
-    x[0], [x.tolist() for x in x[1][0]], calculate_similarity(x[1][0]), x[1][2]))
+print('#'*100)
+print('caculating similarity')
+# Row(id, list(sentence vectors), list(similarity(float)), count)
+test7 = test6.map(
+    lambda x: (x[0], [x.tolist() for x in x[1][0]], calculate_similarity(x[1][0]), x[1][2]))
 
 
-def vote(sim, count):
+def vote(sim, count, treshold):
+    """
+    to take the vote, if the majorty of the reviews are similar, it is a potential fake account
+    sim - a list of 
+    """
     if len(sim) < 1:
         return True
-    vote = [True if si > 0.6 else False for si in sim]
+    vote = [True if si > treshold else False for si in sim]
     if Counter(vote)[1] < count//2 + 1:
         return True
     else:
         return False
 
 
-print("*"*50)
-print('detect fake account')
-test8 = test7.map(lambda x: (
-    (x[0]), int(x[3]), vote(x[2], x[3]), x[1]))
-#rdd = test8.collect()
+print('#'*100)
+print('vote')
+# Row(id, count, fake or not, list(sentence vectors), list(similarity) )
+test8 = test7.map(
+    lambda x: (x[0], x[3], vote(x[2], x[3], 0.7), x[1], x[2]))
+print(test8.take(1))
 
 
 # schema = StructType(
@@ -188,21 +204,24 @@ test8 = test7.map(lambda x: (
 # ,StructField(count,IntegerType,true),StructField(fake,BooleanType,true)\
 # ,StructField(reveiw,ArrayType(ArrayType(FloatType,true),true),true)))
 
-
+# write into spark
+print('#'*100)
+print('writing data into Cassandra')
 schema = StructType(
     [
         StructField("user_id", StringType(), True),
         StructField("count", IntegerType(), True),
         StructField("fake", BooleanType(), True),
-        StructField("review", ArrayType(ArrayType(FloatType())), True)
+        StructField("review", ArrayType(ArrayType(FloatType())), True),
+        StructField("similarity", ArrayType(FloatType()), True)
     ])
 
 sqlContext = SQLContext(sc)
 df2 = sqlContext.createDataFrame(test8, schema)
-df2.show(3)
-os.environ['PYSPARK_SUBMIT_ARGS'] = '--packages \
-    com.datastax.spark:spark-cassandra-connector_2.11:2.3.2 \
-        --conf spark.cassandra.connection.host=10.0.0.13 pyspark-shell'
+df2.show(1)
+# os.environ['PYSPARK_SUBMIT_ARGS'] = '--packages \
+#     com.datastax.spark:spark-cassandra-connector_2.11:2.3.2 \
+#         --conf spark.cassandra.connection.host=10.0.0.13 pyspark-shell'
 df2.write.format("org.apache.spark.sql.cassandra")\
     .mode('append')\
     .options(table="user_reviews", keyspace="project")\
