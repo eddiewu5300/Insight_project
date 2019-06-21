@@ -86,19 +86,19 @@ def get_word2vec(sentence):
     return vec_
 
 
-def get_tf(sentence):
+def get_tfidf(sentence):
     """
     calculate the weight of each word in the sentence by pretrained tfidf
     sentence - a list of string type 
     return a list of scaler 
     """
-    tf_ = []
+    tfidf_ = []
     for idx in range(len(sentence)):
         w = sentence[idx]
-        tf = 0.1 * math.log(wikiwords.N * wikiwords.freq(w.lower()) + 10)
-        tf = float('%.2f' % tf)
-        tf_.append(tf)
-    return tf_
+        tfidf = 0.1 * math.log(wikiwords.N * wikiwords.freq(w.lower()) + 10)
+        tfidf = float('%.2f' % tfidf)
+        tfidf_.append(tfidf)
+    return tfidf_
 
 
 def sentence_embeded(sentence):
@@ -107,7 +107,7 @@ def sentence_embeded(sentence):
     sentence - a list of string type 
     return a vector
     """
-    weight = get_tf(sentence)
+    weight = get_tfidf(sentence)
     word_vector = get_word2vec(sentence)
     weighted_sentence = [x * y for x, y in zip(weight, word_vector)]
     embeded_sentence = sum(weighted_sentence)
@@ -116,33 +116,34 @@ def sentence_embeded(sentence):
 
 print('#'*100)
 print('start')
-test = df.select('customer_id', 'review_body')
-test2 = test.rdd.map(
+step = df.select('customer_id', 'review_body')
+step2 = step.rdd.map(
     lambda x: (x[0], str(x[1])))
 
 print('#'*100)
 print('text cleaning')
-test3 = test2.map(
+step3 = step2.map(
     lambda x: (x[0], text_cleaning(x[1])))
 
 print('#'*100)
 print('filtering')
-test4 = test3.filter(
+step4 = step3.filter(
     lambda x: len(x[1]) > 0)
 
 
 print('#'*100)
 print('sentence embedding')
 # Row((id, (sentence vectors, len(sentence), 1)
-test5 = test4.map(
+step5 = step4.map(
     lambda x: (x[0], ([sentence_embeded(x[1])], [len(x[1])], 1)))
 
 # reduceby userid
 print('#'*100)
 print('reducing')
 # Row((id, (list(sentence vectors), list(len(sentence)), count)
-test6 = test5.reduceByKey(
-    lambda a, b: (a[0]+b[0], a[1]+b[1], a[2]+a[2]))
+step6 = step5.reduceByKey(
+    lambda a, b: (a[0]+b[0], a[1]+b[1], a[2]+a[2])
+)
 
 
 def calculate_similarity(ls):
@@ -162,19 +163,19 @@ def calculate_similarity(ls):
 print('#'*100)
 print('caculating similarity')
 # Row(id, list(sentence vectors), list(similarity(float)), count)
-test7 = test6.map(
+step7 = step6.map(
     lambda x: (x[0], [x.tolist() for x in x[1][0]], calculate_similarity(x[1][0]), x[1][2]))
 
 
 def vote(sim, count, treshold):
     """
     to take the vote, if the majorty of the reviews are similar, it is a potential fake account
-    sim - a list of 
+    sim - a list of
     """
     if len(sim) < 1:
-        return True
+        return False
     vote = [True if si > treshold else False for si in sim]
-    if Counter(vote)[1] < count//2 + 1:
+    if Counter(vote)[1] > count//2 + 1:
         return True
     else:
         return False
@@ -182,11 +183,12 @@ def vote(sim, count, treshold):
 
 print('#'*100)
 print('vote')
-# Row(id, count, fake or not, list(sentence vectors), list(similarity) )
-test8 = test7.map(
-    lambda x: (x[0], x[3], vote(x[2], x[3], 0.7), x[1], x[2]))
-print(test8.take(1))
 
+
+# Row(id, count, fake or not, list(sentence vectors), list(similarity) )
+step8 = step7 \
+    .map(lambda x: (x[0], x[3], vote(x[2], x[3], 0.7), x[1], x[2]))\
+    .filter(lambda x: x[1] < 1000)
 
 # schema = StructType(
 #     [
@@ -217,14 +219,14 @@ schema = StructType(
     ])
 
 sqlContext = SQLContext(sc)
-df2 = sqlContext.createDataFrame(test8, schema)
-df2.show(1)
+df2 = sqlContext.createDataFrame(step8, schema)
+df2.show(3)
 # os.environ['PYSPARK_SUBMIT_ARGS'] = '--packages \
 #     com.datastax.spark:spark-cassandra-connector_2.11:2.3.2 \
 #         --conf spark.cassandra.connection.host=10.0.0.13 pyspark-shell'
 df2.write.format("org.apache.spark.sql.cassandra")\
     .mode('append')\
-    .options(table="user_reviews", keyspace="project")\
+    .options(table="users", keyspace="project")\
     .save()
 
 
