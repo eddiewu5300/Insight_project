@@ -184,6 +184,8 @@ def main(data_path):
     print('Data Stored in Cassandra')
 
 
+main("s3a://amazondata/new_reviews/today/\
+    part-00006-495c48e6-96d6-4650-aa65-3c36a3516ddd.c000.snappy.parquet")
 # write into spark
 
 
@@ -218,4 +220,4 @@ def main(data_path):
 
 # def reduce_by_user(a, b):
 #     result = [a, b]
-#     return result
+#     return resul

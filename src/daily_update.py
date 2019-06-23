@@ -135,18 +135,17 @@ def query_from_cassandra(id, session, keyspace='project', table='users'):
 
 def update_data(id, new_reviews, new_count, session, table='users'):
     count, reviews, similarity = query_from_cassandra(id, session)
-    print('query done:')
     if count == 'user not in database':
         new_reviews = [x.tolist() for x in new_reviews]
         session.execute(
             "INSERT INTO {} (user_id, count, fake, review, similarity) VALUES('{}',{},{},{},{});"
             .format(table, id, new_count, False, new_reviews, [])
         )
-        print('new data')
     else:
         for new_review in new_reviews:
             for review in reviews:
-                sim = cosine_similarity(np.array(review), new_review)
+                sim = cosine_similarity(np.array(review).reshape(
+                    1, -1), new_review.reshape(1, -1))
                 similarity.append(float(sim))
             reviews.append(new_review.tolist())
         count += new_count
@@ -155,7 +154,6 @@ def update_data(id, new_reviews, new_count, session, table='users'):
             "UPDATE {} SET count={}, fake={}, review={}, similarity={} WHERE user_id='{}';"
             .format(table, count, fake, reviews, similarity, id)
         )
-        print('update')
 
 
 def main(data_path):
@@ -165,7 +163,6 @@ def main(data_path):
     model = load_model(sc)
     # Preload stop words
     stop = set(stopwords.words('english'))
-
     # output Row((id, (list(sentence vectors), count)))
     review_rdd = new_reviews.select('customer_id', 'review_body').rdd\
         .map(lambda x: (x[0], str(x[1])))\
@@ -173,7 +170,7 @@ def main(data_path):
         .filter(lambda x: len(x[1]) > 0)\
         .map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1)))\
         .reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
-
+#review_rdd = new_reviews.select('customer_id', 'review_body').rdd.map(lambda x: (x[0], str(x[1]))).map(lambda x: (x[0], text_cleaning(x[1], stop))).filter(lambda x: len(x[1]) > 0).map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1))).reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
     collection = review_rdd.collect()
     cluster = Cluster(['10.0.0.13'])
     session = cluster.connect('project')
@@ -182,7 +179,6 @@ def main(data_path):
         id = user_review[0]
         reviews = user_review[1][0]
         count = user_review[1][1]
-        print(id, reviews, count)
         update_data(id, reviews, count, session)
 
     #review_rdd.map(lambda x: update_data(x[0], x[1][0], x[1][1], session))
