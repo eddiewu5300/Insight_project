@@ -1,5 +1,5 @@
 # pyspark --conf spark.cassandra.connection.host="10.0.0.13" --master spark://ip-10-0-0-11:7077 --conf spark.executor.memoryOverhead=600 --executor-memory 6G --driver-memory 6G
-# spark-submit --conf spark.cassandra.connection.host="10.0.0.13" --master spark://ip-10-0-0-11:7077 --conf spark.executor.memoryOverhead=600 --executor-memory 6G --driver-memory 6G spark_job.py
+# spark-submit --conf spark.cassandra.connection.host="10.0.0.13" --master spark://ip-10-0-0-11:7077 --conf spark.executor.memoryOverhead=600 --executor-memory 5G --total-executor-cores 12 --driver-memory 5G
 from pyspark.sql.types import *
 from pyspark.sql import SQLContext
 from pyspark import SparkContext
@@ -30,30 +30,11 @@ from itertools import combinations
 # nltk.download("stopwords")
 warnings.filterwarnings("ignore")
 
-# Start
-sc = SparkContext()
-spark = SparkSession(sc)
-df = spark.read.parquet(
-    's3a://amazondata/parquet/product_category=Apparel/*.parquet')
 
-
-# Load word2vec model
-now = datetime.datetime.now()
-print('loading model')
-model = KeyedVectors.load_word2vec_format(
-    'glove.6B.50d.txt.word2vec', binary=False)
-print('model loading time')
-print(str(datetime.datetime.now()-now) + 'sec')
-model_broadcast = sc.broadcast(model)
-
-# Preload stop words
-stop = set(stopwords.words('english'))
-
-
-def text_cleaning(sentence, stop=stop):
+def text_cleaning(sentence, stop):
     """
     Remove the punctuation & stop words
-    sentence - str type 
+    sentence - str type
     return list of proccessed str
     """
     lemmatizer = WordNetLemmatizer()
@@ -68,11 +49,11 @@ def text_cleaning(sentence, stop=stop):
     return words
 
 
-def get_word2vec(sentence):
+def get_word2vec(sentence, model):
     """
     project each word to 50 dimention vector
-    sentence - a list of string type 
-    return a list of vector 
+    sentence - a list of string type
+    return a list of vector
     """
     vec_ = []
     for idx in range(len(sentence)):
@@ -89,8 +70,8 @@ def get_word2vec(sentence):
 def get_tfidf(sentence):
     """
     calculate the weight of each word in the sentence by pretrained tfidf
-    sentence - a list of string type 
-    return a list of scaler 
+    sentence - a list of string type
+    return a list of scaler
     """
     tfidf_ = []
     for idx in range(len(sentence)):
@@ -101,70 +82,17 @@ def get_tfidf(sentence):
     return tfidf_
 
 
-def sentence_embeded(sentence):
+def sentence_embeded(sentence, model):
     """
     multipy word vectors with the weight(scaler)
-    sentence - a list of string type 
+    sentence - a list of string type
     return a vector
     """
     weight = get_tfidf(sentence)
-    word_vector = get_word2vec(sentence)
+    word_vector = get_word2vec(sentence, model)
     weighted_sentence = [x * y for x, y in zip(weight, word_vector)]
     embeded_sentence = sum(weighted_sentence)
     return (embeded_sentence)
-
-
-print('#'*100)
-print('start')
-step = df.select('customer_id', 'review_body')
-step2 = step.rdd.map(
-    lambda x: (x[0], str(x[1])))
-
-print('#'*100)
-print('text cleaning')
-step3 = step2.map(
-    lambda x: (x[0], text_cleaning(x[1])))
-
-print('#'*100)
-print('filtering')
-step4 = step3.filter(
-    lambda x: len(x[1]) > 0)
-
-
-print('#'*100)
-print('sentence embedding')
-# Row((id, (sentence vectors, len(sentence), 1)
-step5 = step4.map(
-    lambda x: (x[0], ([sentence_embeded(x[1])], [len(x[1])], 1)))
-
-# reduceby userid
-print('#'*100)
-print('reducing')
-# Row((id, (list(sentence vectors), list(len(sentence)), count)
-step6 = step5.reduceByKey(
-    lambda a, b: (a[0]+b[0], a[1]+b[1], a[2]+a[2])
-)
-
-
-def calculate_similarity(ls):
-    """
-    ls - a list of vec
-    each vec is a numpy array
-    return a list of similarity of pair of reviews
-    """
-    result = []
-    for i in combinations(ls, 2):
-        sim = (cosine_similarity(i[0].reshape(1, -1), i[1].reshape(1, -1)))
-        sim = round(sim[0][0], 2)
-        result.append(float(sim))
-    return result
-
-
-print('#'*100)
-print('caculating similarity')
-# Row(id, list(sentence vectors), list(similarity(float)), count)
-step7 = step6.map(
-    lambda x: (x[0], [x.tolist() for x in x[1][0]], calculate_similarity(x[1][0]), x[1][2]))
 
 
 def vote(sim, count, treshold):
@@ -181,53 +109,87 @@ def vote(sim, count, treshold):
         return False
 
 
-print('#'*100)
-print('vote')
+def calculate_similarity(ls):
+    """
+    ls - a list of vec
+    each vec is a numpy array
+    return a list of similarity of pair of reviews
+    """
+    result = []
+    for i in combinations(ls, 2):
+        sim = (cosine_similarity(i[0].reshape(1, -1), i[1].reshape(1, -1)))
+        sim = round(sim[0][0], 2)
+        result.append(float(sim))
+    return result
 
 
-# Row(id, count, fake or not, list(sentence vectors), list(similarity) )
-step8 = step7 \
-    .map(lambda x: (x[0], x[3], vote(x[2], x[3], 0.7), x[1], x[2]))\
-    .filter(lambda x: x[1] < 1000)
+def load_model(sc):
+    now = datetime.datetime.now()
+    print('loading model')
+    model = KeyedVectors.load_word2vec_format(
+        'glove.6B.50d.txt.word2vec', binary=False)
+    print('model loading time')
+    print(str(datetime.datetime.now()-now) + 'sec')
+    model_broadcast = sc.broadcast(model)
+    return model_broadcast
 
-# schema = StructType(
-#     [
-#         StructField("user_id", StringType(), True),
-#         StructField("count", IntegerType(), True),
-#         StructField("fake", BooleanType(), True),
-#         StructField("reveiw", ArrayType(
-#             StructType([
-#                 StructField("vector", ArrayType(FloatType()), True)
-#             ])
-#         ), True)
-#     ])
 
-# StructType(List(StructField(user_id,StringType,true)\
-# ,StructField(count,IntegerType,true),StructField(fake,BooleanType,true)\
-# ,StructField(reveiw,ArrayType(ArrayType(FloatType,true),true),true)))
+def rdd2DF(rdd, sc):
+    schema = StructType(
+        [
+            StructField("user_id", StringType(), True),
+            StructField("count", IntegerType(), True),
+            StructField("fake", BooleanType(), True),
+            StructField("review", ArrayType(ArrayType(FloatType())), True),
+            StructField("similarity", ArrayType(FloatType()), True)
+        ])
+    sqlContext = SQLContext(sc)
+    users_df = sqlContext.createDataFrame(rdd, schema)
+    users_df.show(3)
+    return users_df
+
+
+def main(data_path):
+    sc = SparkContext()
+    spark = SparkSession(sc)
+    new_reviews = spark.read.parquet(data_path)
+    model = load_model(sc)
+    # Preload stop words
+    stop = set(stopwords.words('english'))
+
+    review_rdd = new_reviews.select('customer_id', 'review_body').rdd\
+        .map(lambda x: (x[0], str(x[1])))\
+        .map(lambda x: (x[0], text_cleaning(x[1], stop)))\
+        .filter(lambda x: len(x[1]) > 0)\
+        .map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1)))\
+        .reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
+
+    # similarity: Row(id, list(sentence vectors), list(similarity(float)), count)
+    # vote: Row(id, count, fake or not, list(sentence vectors), list(similarity) )
+    rdd = review_rdd.map(lambda x: (x[0], [x.tolist() for x in x[1][0]], calculate_similarity(x[1][0]), x[1][1]))\
+        .map(lambda x: (x[0], x[3], vote(x[2], x[3], 0.8), x[1], x[2]))\
+        .filter(lambda x: x[1] < 1000)
+
+    print('#'*100)
+    print('RDD ready')
+    print('Transfering to DF')
+    users_df = rdd2DF(rdd, sc)
+
+    print('#'*100)
+    print('writing data into Cassandra')
+    users_df.write.format("org.apache.spark.sql.cassandra")\
+        .mode('append')\
+        .options(table="users", keyspace="project")\
+        .save()
+    print('Data Stored in Cassandra')
+
 
 # write into spark
-print('#'*100)
-print('writing data into Cassandra')
-schema = StructType(
-    [
-        StructField("user_id", StringType(), True),
-        StructField("count", IntegerType(), True),
-        StructField("fake", BooleanType(), True),
-        StructField("review", ArrayType(ArrayType(FloatType())), True),
-        StructField("similarity", ArrayType(FloatType()), True)
-    ])
 
-sqlContext = SQLContext(sc)
-df2 = sqlContext.createDataFrame(step8, schema)
-df2.show(3)
+
 # os.environ['PYSPARK_SUBMIT_ARGS'] = '--packages \
 #     com.datastax.spark:spark-cassandra-connector_2.11:2.3.2 \
 #         --conf spark.cassandra.connection.host=10.0.0.13 pyspark-shell'
-df2.write.format("org.apache.spark.sql.cassandra")\
-    .mode('append')\
-    .options(table="users", keyspace="project")\
-    .save()
 
 
 # if(config.LOG_DEBUG):
@@ -257,7 +219,3 @@ df2.write.format("org.apache.spark.sql.cassandra")\
 # def reduce_by_user(a, b):
 #     result = [a, b]
 #     return result
-
-
-# df3 = df2.rdd.map(lambda x: (x[0], (x[1], x[2])))
-# df3.reduceByKey(reduce_by_user).take(1)

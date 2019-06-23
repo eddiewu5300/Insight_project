@@ -23,18 +23,20 @@ class PythonCassandraExample:
     def createsession(self):
         self.cluster = Cluster(self.host)
         self.session = self.cluster.connect(self.keyspace)
+        self.log.info("Session Created!")
 
     def getsession(self):
         return self.session
 
     # How about Adding some log info to see what went wrong
-    # def setlogger(self):
-    #     log = logging.getLogger()
-    #     log.setLevel('INFO')
-    #     handler = logging.StreamHandler()
-    #     handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
-    #     log.addHandler(handler)
-    #     self.log = log
+    def setlogger(self):
+        log = logging.getLogger()
+        log.setLevel('INFO')
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+        log.addHandler(handler)
+        self.log = log
 
     # Create Keyspace based on Given Name
     def createkeyspace(self, keyspace, drop=False):
@@ -69,7 +71,7 @@ class PythonCassandraExample:
                 count int,
                 fake boolean,
                 review list<frozen<list<float>>>,
-                similarity list<float>;
-                 """
+                similarity list<float>);
+                """
         self.session.execute(c_sql)
         self.log.info("Users Table Created !!!")

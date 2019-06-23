@@ -9,3 +9,7 @@ glove.6B.100d.txt
 glove.6B.100d.txt.word2vec
 test/
 spark_cassandra.py
+
+
+
+
