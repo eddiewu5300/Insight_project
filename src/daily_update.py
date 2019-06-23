@@ -33,7 +33,7 @@ def load_model(sc):
     print('model loading time')
     print(str(datetime.datetime.now()-now) + 'sec')
     model_broadcast = sc.broadcast(model)
-    return model_broadcast
+    return model
 
 
 def text_cleaning(sentence, stop):
@@ -170,7 +170,7 @@ def main(data_path):
         .filter(lambda x: len(x[1]) > 0)\
         .map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1)))\
         .reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
-#review_rdd = new_reviews.select('customer_id', 'review_body').rdd.map(lambda x: (x[0], str(x[1]))).map(lambda x: (x[0], text_cleaning(x[1], stop))).filter(lambda x: len(x[1]) > 0).map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1))).reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
+    #review_rdd = new_reviews.select('customer_id', 'review_body').rdd.map(lambda x: (x[0], str(x[1]))).map(lambda x: (x[0], text_cleaning(x[1], stop))).filter(lambda x: len(x[1]) > 0).map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1))).reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
     collection = review_rdd.collect()
     cluster = Cluster(['10.0.0.13'])
     session = cluster.connect('project')

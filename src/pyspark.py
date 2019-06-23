@@ -166,14 +166,16 @@ def main(data_path):
 
     # similarity: Row(id, list(sentence vectors), list(similarity(float)), count)
     # vote: Row(id, count, fake or not, list(sentence vectors), list(similarity) )
-    rdd = review_rdd.map(lambda x: (x[0], [x.tolist() for x in x[1][0]], calculate_similarity(x[1][0]), x[1][1]))\
+    fake_account_rdd = review_rdd\
+        .map(lambda x: (x[0], [x.tolist() for x in x[1][0]],
+                        calculate_similarity(x[1][0]), x[1][1]))\
         .map(lambda x: (x[0], x[3], vote(x[2], x[3], 0.8), x[1], x[2]))\
         .filter(lambda x: x[1] < 1000)
 
     print('#'*100)
     print('RDD ready')
     print('Transfering to DF')
-    users_df = rdd2DF(rdd, sc)
+    users_df = rdd2DF(fake_account_rdd, sc)
 
     print('#'*100)
     print('writing data into Cassandra')
