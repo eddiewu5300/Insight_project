@@ -156,14 +156,14 @@ def main(data_path):
     model = load_model(sc)
     # Preload stop words
     stop = set(stopwords.words('english'))
-
+    print('#'*100)
+    print("Spark jobs start")
     review_rdd = new_reviews.select('customer_id', 'review_body').rdd\
         .map(lambda x: (x[0], str(x[1])))\
         .map(lambda x: (x[0], text_cleaning(x[1], stop)))\
         .filter(lambda x: len(x[1]) > 0)\
         .map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1)))\
         .reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
-
     # similarity: Row(id, list(sentence vectors), list(similarity(float)), count)
     # vote: Row(id, count, fake or not, list(sentence vectors), list(similarity) )
     fake_account_rdd = review_rdd\
@@ -181,12 +181,14 @@ def main(data_path):
     print('writing data into Cassandra')
     fake_account_df.write.format("org.apache.spark.sql.cassandra")\
         .mode('append')\
-        .options(table="fakeAccount", keyspace="project")\
+        .options(table="fakeaccount", keyspace="project")\
         .save()
     print('Data Stored in Cassandra')
 
 
 main("s3a://amazondata/parquet/*/*.parquet")
+
+
 # write into spark
 
 
@@ -214,11 +216,3 @@ main("s3a://amazondata/parquet/*/*.parquet")
 # word2vec_try = udf(lambda ls: get_word2vec(ls), ArrayType(FloatType()))
 # word2vec_df = proccessed_df.withColumn(
 #     "word2vec", word2vec_try("cleaned_text"))
-
-
-# df2 = proccessed_df.select('customer_id', 'text_length', 'cleaned_text')
-
-
-# def reduce_by_user(a, b):
-#     result = [a, b]
-#     return resul
