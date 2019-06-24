@@ -164,7 +164,6 @@ def main(data_path):
         .filter(lambda x: len(x[1]) > 0)\
         .map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1)))\
         .reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
-
     # similarity: Row(id, list(sentence vectors), list(similarity(float)), count)
     # vote: Row(id, count, fake or not, list(sentence vectors), list(similarity) )
     fake_account_rdd = review_rdd\
@@ -182,7 +181,7 @@ def main(data_path):
     print('writing data into Cassandra')
     fake_account_df.write.format("org.apache.spark.sql.cassandra")\
         .mode('append')\
-        .options(table="fakeAccount", keyspace="project")\
+        .options(table="fakeaccount", keyspace="project")\
         .save()
     print('Data Stored in Cassandra')
 
