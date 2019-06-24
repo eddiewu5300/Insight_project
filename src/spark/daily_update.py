@@ -114,14 +114,14 @@ def vote(sim, count, treshold):
         return False
 
 
-def query_from_cassandra(id, session, keyspace='project', table='users'):
+def query_from_cassandra(id, session, keyspace='project', table='fakeAccount'):
     """
     id - a user id, primary key in cassandra
     return the value from key
     """
     try:
         row = session.execute(
-            "SELECT * FROM project.users WHERE user_id ='{}';".format(id)
+            "SELECT * FROM project.fakeAccount WHERE user_id ='{}';".format(id)
         )[0]
     except:
         return 'user not in database', None, None
@@ -133,7 +133,7 @@ def query_from_cassandra(id, session, keyspace='project', table='users'):
     return count, reviews, similarity
 
 
-def update_data(id, new_reviews, new_count, session, table='users'):
+def update_data(id, new_reviews, new_count, session, table='fakeAccount'):
     count, reviews, similarity = query_from_cassandra(id, session)
     if count == 'user not in database':
         new_reviews = [x.tolist() for x in new_reviews]

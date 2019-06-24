@@ -156,8 +156,7 @@ def main(data_path):
     model = load_model(sc)
     # Preload stop words
     stop = set(stopwords.words('english'))
-    print('#'*100)
-    print("Spark jobs start")
+
     review_rdd = new_reviews.select('customer_id', 'review_body').rdd\
         .map(lambda x: (x[0], str(x[1])))\
         .map(lambda x: (x[0], text_cleaning(x[1], stop)))\
@@ -188,8 +187,6 @@ def main(data_path):
 
 
 main("s3a://amazondata/parquet/*/*.parquet")
-
-
 # write into spark
 
 
@@ -217,3 +214,11 @@ main("s3a://amazondata/parquet/*/*.parquet")
 # word2vec_try = udf(lambda ls: get_word2vec(ls), ArrayType(FloatType()))
 # word2vec_df = proccessed_df.withColumn(
 #     "word2vec", word2vec_try("cleaned_text"))
+
+
+# df2 = proccessed_df.select('customer_id', 'text_length', 'cleaned_text')
+
+
+# def reduce_by_user(a, b):
+#     result = [a, b]
+#     return resul
