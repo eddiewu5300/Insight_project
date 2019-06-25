@@ -14,7 +14,6 @@ class PythonCassandraExample:
         self.cluster = None
         self.session = None
         self.keyspace = keyspace
-        self.log = None
         self.host = host
 
     def __del__(self):
@@ -23,20 +22,20 @@ class PythonCassandraExample:
     def createsession(self):
         self.cluster = Cluster(self.host)
         self.session = self.cluster.connect(self.keyspace)
-        self.log.info("Session Created!")
+        print("Session Created!")
 
     def getsession(self):
         return self.session
 
     # How about Adding some log info to see what went wrong
-    def setlogger(self):
-        log = logging.getLogger()
-        log.setLevel('INFO')
-        handler = logging.StreamHandler()
-        handler.setFormatter(logging.Formatter(
-            "%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
-        log.addHandler(handler)
-        self.log = log
+    # def setlogger(self):
+    #     log = logging.getLogger()
+    #     log.setLevel('INFO')
+    #     handler = logging.StreamHandler()
+    #     handler.setFormatter(logging.Formatter(
+    #         "%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    #     log.addHandler(handler)
+    #     self.log = log
 
     # Create Keyspace based on Given Name
     def createkeyspace(self, keyspace, drop=False):
@@ -55,23 +54,23 @@ class PythonCassandraExample:
                 self.log.info("existing keyspace, not doing anything...")
                 return
 
-        self.log.info("creating keyspace...")
+        print("creating keyspace...")
         self.session.execute("""
                 CREATE KEYSPACE %s
                 WITH replication = { 'class': 'SimpleStrategy', 'replication_factor': '1' }
                 """ % keyspace)
 
-        self.log.info("setting keyspace...")
+        print("setting keyspace...")
         self.session.set_keyspace(keyspace)
 
-    def create_tables(self):
+    def create_tables(self, table):
         c_sql = """
-                CREATE TABLE IF NOT EXISTS users (
+                CREATE TABLE IF NOT EXISTS {}  (
                 user_id text PRIMARY KEY,
                 count int,
                 fake boolean,
                 review list<frozen<list<float>>>,
                 similarity list<float>);
-                """
+                """.format(str(table))
         self.session.execute(c_sql)
-        self.log.info("Users Table Created !!!")
+        print(str(table)+" Table Created !!!")

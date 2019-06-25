@@ -1,5 +1,8 @@
 # pyspark --conf spark.cassandra.connection.host="10.0.0.13" --master spark://ip-10-0-0-11:7077 --conf spark.executor.memoryOverhead=600 --executor-memory 6G --driver-memory 6G
 # spark-submit --conf spark.cassandra.connection.host="10.0.0.13" --master spark://ip-10-0-0-11:7077 --conf spark.executor.memoryOverhead=600 --executor-memory 5G --total-executor-cores 12 --driver-memory 5G
+import sys
+import os
+import configparser
 from pyspark.sql.types import *
 from pyspark.sql import SQLContext
 from pyspark import SparkContext
@@ -25,6 +28,7 @@ import time
 import numpy as np
 # from termcolor import colored
 from itertools import combinations
+from datastore import cassandra_store
 # nltk.download("wordnet")
 # nltk.download("stopwords")
 warnings.filterwarnings("ignore")
@@ -151,53 +155,94 @@ def rdd2DF(rdd, sc):
 def main(data_path):
     sc = SparkContext()
     spark = SparkSession(sc)
-    new_reviews = spark.read.parquet(data_path)
     model = load_model(sc)
     # Preload stop words
     stop = set(stopwords.words('english'))
     print('#'*100)
     print("Spark jobs start")
-    review_rdd = new_reviews.select('customer_id', 'review_body').rdd\
-        .map(lambda x: (x[0], str(x[1])))\
-        .map(lambda x: (x[0], text_cleaning(x[1], stop)))\
-        .filter(lambda x: len(x[1]) > 0)\
-        .map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1)))\
-        .reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
-    # similarity: Row(id, list(sentence vectors), list(similarity(float)), count)
-    # vote: Row(id, count, fake or not, list(sentence vectors), list(similarity) )
-    fake_account_rdd = review_rdd\
-        .map(lambda x: (x[0], [x.tolist() for x in x[1][0]],
-                        calculate_similarity(x[1][0]), x[1][1]))\
-        .map(lambda x: (x[0], x[3], vote(x[2], x[3], 0.8), x[1], x[2]))\
-        .filter(lambda x: x[1] < 1000)
 
-    fake_account_rdd2 = fake_account_rdd.map(lambda x: Row(
-        user_id=x[0],
-        count=x[1],
-        fake=x[2],
-        review=x[3],
-        similarity=x[4]
-    ))
+    cass = cassandra_store.PythonCassandraExample(
+        host=["10.0.0.13"], keyspace="project")
+    cass.createsession()
 
-    fake_account_rdd2 = fake_account_rdd2.map(lambda x: ())
-    print('#'*100)
-    print('RDD ready')
-    print('Transfering to DF')
-    fake_account_df = rdd2DF(fake_account_rdd, sc)
+    categories = ['Apparel', 'Automotive', 'Baby', 'Beauty', 'Books', 'Camera', 'Digital_Ebook_Purchase', 'Electronics', 'Furniture', 'Health_&_Personal_Care', 'Home', 'Kitchen',
+                  'Lawn_and_Garden', 'Mobile_Apps', 'Music', 'Office_Products', 'Outdoors', 'PC', 'Pet_Products', 'Shoes', 'Sports', 'Toys', 'Video_DVD', 'Video_Games', 'Wireless']
+    for cat in categories:
+        print("*"*100)
+        print('Processing ' + cat)
+        path = data_path + 'product_category=' + str(cat) + '/*.parquet'
+        new_reviews = spark.read.parquet(path)
+        review_rdd = new_reviews.select('customer_id', 'review_body').rdd\
+            .map(lambda x: (x[0], str(x[1])))\
+            .map(lambda x: (x[0], text_cleaning(x[1], stop)))\
+            .filter(lambda x: len(x[1]) > 0)\
+            .map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1)))\
+            .reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
+        # similarity: Row(id, list(sentence vectors), list(similarity(float)), count)
+        # vote: Row(id, count, fake or not, list(sentence vectors), list(similarity) )
+        fake_account_rdd = review_rdd\
+            .map(lambda x: (x[0], [x.tolist() for x in x[1][0]],
+                            calculate_similarity(x[1][0]), x[1][1]))\
+            .map(lambda x: (x[0], x[3], vote(x[2], x[3], 0.8), x[1], x[2]))\
+            .filter(lambda x: x[1] < 1000)
 
-    print('#'*100)
-    print('writing data into Cassandra')
-    fake_account_df.write.format("org.apache.spark.sql.cassandra")\
-        .mode('append')\
-        .options(table="fakeaccount", keyspace="project")\
-        .save()
-    print('Data Stored in Cassandra')
+        print('#'*100)
+        print('RDD ready')
+        print('Transfering to DF')
+        fake_account_df = rdd2DF(fake_account_rdd, sc)
+
+        print('#'*100)
+        print('creating table')
+        cat = cat.lower()
+        cass.create_tables(cat)
+        print('#'*100)
+        print('writing data into Cassandra')
+        fake_account_df.write.format("org.apache.spark.sql.cassandra")\
+            .mode('append')\
+            .options(table=cat, keyspace="project")\
+            .save()
+        print('Data Stored in Cassandra')
 
 
-main("s3a://amazondata/parquet/*/*.parquet")
+main("s3a://amazondata/parquet/")
+
+# def write_rdd_to_cas(rdd):
+#     rdb = redis.StrictRedis(config.REDIS_SERVER, port=6379, db=0)
+#     for row in rdd:
+#         rdb.sadd('cat:{}'.format(row.category), row.ids)
+# cat_id_map.foreachPartition(write_cat_id_map_to_redis)
 
 
-# write into spark
+# from cassandra.cluster import Cluster
+# def write_rdd_to_cas(rdd):
+#     cluster = Cluster(['10.0.0.13'])
+#     session = cluster.connect('project')
+#     for row in rdd:
+#         session.execute(
+#             "INSERT INTO {} (user_id, count, fake, review, similarity) VALUES('{}',{},{},{},{});"
+#             .format(table, id, new_count, False, new_reviews, [])
+#         )
+
+# def write_df_to_cas(df):
+#     os.environ['PYSPARK_SUBMIT_ARGS'] = '--packages com.datastax.spark:spark-cassandra-connector_2.11:2.3.2 --conf spark.cassandra.connection.host=10.0.0.13 pyspark-shell'
+#     df.write.format("org.apache.spark.sql.cassandra")\
+#     .mode('append')\
+#     .options(table="fakeaccount", keyspace="project")\
+#     .save()
+
+
+# fake_account_df.foreachPartition(write_df_to_cas)
+
+
+# fake_account_rdd2 = fake_account_rdd.map(lambda x : Row(
+#                                         user_id = x[0],
+#                                         count = x[1],
+#                                         fake = x[2],
+#                                         review = x[3],
+#                                         similarity = x[4]
+#                                         ))
+
+# # write into spark
 
 
 # os.environ['PYSPARK_SUBMIT_ARGS'] = '--packages \
@@ -205,22 +250,22 @@ main("s3a://amazondata/parquet/*/*.parquet")
 #         --conf spark.cassandra.connection.host=10.0.0.13 pyspark-shell'
 
 
-# if(config.LOG_DEBUG):
-#    print(colored("[PROCESSING]: Cleaning question body...", "green"))
-# clean_text = udf(lambda text: text_cleaning(text), StringType())
-# text_cleaned = df.withColumn("cleaned_text", clean_text("review_body"))
+# # if(config.LOG_DEBUG):
+# #    print(colored("[PROCESSING]: Cleaning question body...", "green"))
+# # clean_text = udf(lambda text: text_cleaning(text), StringType())
+# # text_cleaned = df.withColumn("cleaned_text", clean_text("review_body"))
 
-# len_text = udf(lambda ls: len(ls), IntegerType())
-# proccessed_df = text_cleaned.withColumn(
-#     "text_length", len_text("cleaned_text"))
+# # len_text = udf(lambda ls: len(ls), IntegerType())
+# # proccessed_df = text_cleaned.withColumn(
+# #     "text_length", len_text("cleaned_text"))
 
-# sen_embeded = udf(lambda ls: sentence_embeded(ls), StringType())
-# embeded_df  = proccessed_df.withColumn("sen_vec", sen_embeded("cleaned_text"))
+# # sen_embeded = udf(lambda ls: sentence_embeded(ls), StringType())
+# # embeded_df  = proccessed_df.withColumn("sen_vec", sen_embeded("cleaned_text"))
 
 
-# tf_try = udf(lambda ls: get_tf(ls), StringType())
-# tf_df = proccessed_df.withColumn("tf_vec", tf_try("cleaned_text"))
+# # tf_try = udf(lambda ls: get_tf(ls), StringType())
+# # tf_df = proccessed_df.withColumn("tf_vec", tf_try("cleaned_text"))
 
-# word2vec_try = udf(lambda ls: get_word2vec(ls), ArrayType(FloatType()))
-# word2vec_df = proccessed_df.withColumn(
-#     "word2vec", word2vec_try("cleaned_text"))
+# # word2vec_try = udf(lambda ls: get_word2vec(ls), ArrayType(FloatType()))
+# # word2vec_df = proccessed_df.withColumn(
+# #     "word2vec", word2vec_try("cleaned_text"))
