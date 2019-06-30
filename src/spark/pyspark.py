@@ -28,7 +28,7 @@ import time
 import numpy as np
 # from termcolor import colored
 from itertools import combinations
-from datastore import cassandra_store
+from cassandra import cassandra_store
 from config.config import *
 # nltk.download("wordnet")
 # nltk.download("stopwords")
