@@ -23,9 +23,13 @@ import re
 import time
 import numpy as np
 from itertools import combinations
+from config.cofig import *
 
 
 def load_model(sc):
+    """
+    Load word2vec model
+    """
     now = datetime.datetime.now()
     print('loading model')
     model = KeyedVectors.load_word2vec_format(
@@ -95,7 +99,8 @@ def sentence_embeded(sentence, model):
     """
     weight = get_tfidf(sentence)
     word_vector = get_word2vec(sentence, model)
-    weighted_sentence = [x * y for x, y in zip(weight, word_vector)]
+    weighted_sentence = [np.round(x * y, 2)
+                         for x, y in zip(weight, word_vector)]
     embeded_sentence = sum(weighted_sentence)
     return (embeded_sentence)
 
@@ -114,14 +119,14 @@ def vote(sim, count, treshold):
         return False
 
 
-def query_from_cassandra(id, session, keyspace='project', table='fakeAccount'):
+def query_from_cassandra(id, session, keyspace='project', table):
     """
     id - a user id, primary key in cassandra
     return the value from key
     """
     try:
         row = session.execute(
-            "SELECT * FROM project.fakeAccount WHERE user_id ='{}';".format(id)
+            "SELECT * FROM project.{} WHERE user_id ='{}';".format(table, id)
         )[0]
     except:
         return 'user not in database', None, None
@@ -133,8 +138,8 @@ def query_from_cassandra(id, session, keyspace='project', table='fakeAccount'):
     return count, reviews, similarity
 
 
-def update_data(id, new_reviews, new_count, session, table='fakeAccount'):
-    count, reviews, similarity = query_from_cassandra(id, session)
+def update_data(id, new_reviews, new_count, session, table):
+    count, reviews, similarity = query_from_cassandra(id, session, table)
     if count == 'user not in database':
         new_reviews = [x.tolist() for x in new_reviews]
         session.execute(
@@ -159,31 +164,42 @@ def update_data(id, new_reviews, new_count, session, table='fakeAccount'):
 def main(data_path):
     sc = SparkContext()
     spark = SparkSession(sc)
-    new_reviews = spark.read.parquet(data_path)
     model = load_model(sc)
     # Preload stop words
     stop = set(stopwords.words('english'))
-    # output Row((id, (list(sentence vectors), count)))
-    review_rdd = new_reviews.select('customer_id', 'review_body').rdd\
-        .map(lambda x: (x[0], str(x[1])))\
-        .map(lambda x: (x[0], text_cleaning(x[1], stop)))\
-        .filter(lambda x: len(x[1]) > 0)\
-        .map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1)))\
-        .reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
-    #review_rdd = new_reviews.select('customer_id', 'review_body').rdd.map(lambda x: (x[0], str(x[1]))).map(lambda x: (x[0], text_cleaning(x[1], stop))).filter(lambda x: len(x[1]) > 0).map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1))).reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
-    collection = review_rdd.collect()
-    cluster = Cluster(['10.0.0.13'])
-    session = cluster.connect('project')
+    print('#'*100)
+    print("Spark jobs start")
 
-    for user_review in collection:
-        id = user_review[0]
-        reviews = user_review[1][0]
-        count = user_review[1][1]
-        update_data(id, reviews, count, session)
+    cass = cassandra_store.PythonCassandraExample(
+        host=["10.0.0.13"], keyspace="project")
+    cass.createsession()
 
+    for cat in config['categories']:
+        print("*"*100)
+        print('Processing ' + cat)
+        path = data_path + 'new_reviews' + str(cat) + '/*.parquet'
+        new_reviews = spark.read.parquet(path)
+        # output Row((id, (list(sentence vectors), count)))
+        review_rdd = new_reviews.select('customer_id', 'review_body').rdd\
+            .map(lambda x: (x[0], str(x[1])))\
+            .map(lambda x: (x[0], text_cleaning(x[1], stop)))\
+            .filter(lambda x: len(x[1]) > 0)\
+            .map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1)))\
+            .reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
+
+        #review_rdd = new_reviews.select('customer_id', 'review_body').rdd.map(lambda x: (x[0], str(x[1]))).map(lambda x: (x[0], text_cleaning(x[1], stop))).filter(lambda x: len(x[1]) > 0).map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1))).reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
+        collection = review_rdd.collect()
+
+        cat = cat.lower().replace('&', '')
+        for user_review in collection:
+            id = user_review[0]
+            reviews = user_review[1][0]
+            count = user_review[1][1]
+            update_data(id, reviews, count, cass, cat)
+        print(str(cat)+' table update completed')
+    print('Database update completed')
     #review_rdd.map(lambda x: update_data(x[0], x[1][0], x[1][1], session))
 
-    print('Data Base update completed')
 
-
-main("s3a://amazondata/new_reviews/2019/part-00000-495c48e6-96d6-4650-aa65-3c36a3516ddd.c000.snappy.parquet")
+if __name__ == "__main__":
+    main("s3a://amazondata/new_reviews/")

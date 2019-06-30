@@ -12,3 +12,7 @@ def load_model_parameters(model_parameters='glove.6B.50d.txt'):
     glove_input_file = model_parameters
     word2vec_output_file = model_parameters + 'word2vec'
     glove2word2vec(glove_input_file, word2vec_output_file)
+
+
+if __name__ == '__main__':
+    load_model_parameters()

@@ -6,6 +6,7 @@ This file is used by setup.py to create necessary cassandra tables
 """
 import logging
 from cassandra.cluster import Cluster
+from config.config import *
 
 
 class PythonCassandraExample:
@@ -26,16 +27,6 @@ class PythonCassandraExample:
 
     def getsession(self):
         return self.session
-
-    # How about Adding some log info to see what went wrong
-    # def setlogger(self):
-    #     log = logging.getLogger()
-    #     log.setLevel('INFO')
-    #     handler = logging.StreamHandler()
-    #     handler.setFormatter(logging.Formatter(
-    #         "%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
-    #     log.addHandler(handler)
-    #     self.log = log
 
     # Create Keyspace based on Given Name
     def createkeyspace(self, keyspace, drop=False):

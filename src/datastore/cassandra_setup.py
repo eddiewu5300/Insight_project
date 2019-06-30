@@ -1,7 +1,7 @@
 from datastore import cassandra_store
+from config.config import *
 
 cass = cassandra_store.PythonCassandraExample(
-    host=["10.0.0.13"], keyspace="project")
+    host=config['cassandra_host'], keyspace=config['cassandra_keyspace'])
 cass.createsession()
-# cass.setlogger()
 cass.create_tables()
