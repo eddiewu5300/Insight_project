@@ -1,8 +1,10 @@
 # pyspark --conf spark.cassandra.connection.host="10.0.0.13" --master spark://ip-10-0-0-11:7077 --conf spark.executor.memoryOverhead=600 --executor-memory 6G --driver-memory 6G
 # spark-submit --conf spark.cassandra.connection.host="10.0.0.13" --master spark://ip-10-0-0-11:7077 --conf spark.executor.memoryOverhead=600 --executor-memory 5G --total-executor-cores 12 --driver-memory 5G
+from pyspark.sql.functions import collect_set, collect_list
+from pyspark.ml.feature import Tokenizer
+from pyspark.ml.feature import StopWordsRemover
 import sys
 import os
-import configparser
 from pyspark.sql.types import *
 from pyspark.sql import SQLContext
 from pyspark import SparkContext
@@ -35,22 +37,21 @@ from config.config import *
 warnings.filterwarnings("ignore")
 
 
-def text_cleaning(sentence, stop):
-    """
-    Remove the punctuation & stop words
-    sentence - str type
-    return list of proccessed str
-    """
-    lemmatizer = WordNetLemmatizer()
-    sentence = sentence.lower()
+def lemmatize(tokens):
+    wordnet_lemmatizer = WordNetLemmatizer()
+    stems = [wordnet_lemmatizer.lemmatize(token)
+             for token in tokens if len(token) > 1]
+    return stems
+
+
+def filter_body(body):
     cleanr = re.compile('<.*?>')
-    sentence = re.sub(cleanr, ' ', sentence)
-    sentence = re.sub(r'[?|!|\'|"|#]', r'', sentence)
-    sentence = re.sub(r'[.|,|)|(|\|/]', r' ', sentence)
-    sentence = re.sub(r'\d+', r' ', sentence)
-    words = [lemmatizer.lemmatize(word) for word in sentence.split(
-    ) if word not in stop and len(word) > 1]
-    return words
+    body = re.sub(cleanr, '', str(body))
+    body = re.sub(r'[?|!|\'|"|#]', "", body)
+    body = re.sub(r"[^\w\s]", "", body)
+    body = re.sub(r'[.|,|)|(|\|/]', "", body)
+    body = re.sub(r'\d+', r'', body)
+    return str(body)
 
 
 def get_word2vec(sentence, model):
@@ -66,8 +67,8 @@ def get_word2vec(sentence, model):
             vec = model.wv[tmp]
         except:
             vec = np.repeat(0.0, 50)
-        # vec_.append(np.round(vec, 5))
         vec_.append(vec)
+        # vec_.append([round(x,2) for x in vec.tolist()])
     return vec_
 
 
@@ -94,9 +95,11 @@ def sentence_embeded(sentence, model):
     """
     weight = get_tfidf(sentence)
     word_vector = get_word2vec(sentence, model)
-    weighted_sentence = [np.round(x * y, 2)
+    weighted_sentence = [x * y
                          for x, y in zip(weight, word_vector)]
     embeded_sentence = sum(weighted_sentence)
+    embeded_sentence = np.round(embeded_sentence, 2)
+    embeded_sentence = embeded_sentence.tolist()
     return embeded_sentence
 
 
@@ -142,75 +145,48 @@ def load_model(sc):
     return model
 
 
-def rdd2DF(rdd, sc):
-    schema = StructType(
-        [
-            StructField("user_id", StringType(), True),
-            StructField("count", IntegerType(), True),
-            StructField("fake", BooleanType(), True),
-            StructField("review", ArrayType(ArrayType(FloatType())), True),
-            StructField("similarity", ArrayType(FloatType()), True)
-        ])
-    sqlContext = SQLContext(sc)
-    users_df = sqlContext.createDataFrame(rdd, schema)
-    users_df.show(3)
-    return users_df
-
-
-def main(data_path):
-    sc = SparkContext()
-    spark = SparkSession(sc)
+def main(path):
+    df = spark.read.parquet(path + "product_category=Apparel/*.parquet")
+    df = df.select('customer_id', 'review_body')
     model = load_model(sc)
-    # Preload stop words
-    stop = set(stopwords.words('english'))
-    print('#'*100)
-    print("Spark jobs start")
 
-    cass = cassandra_store.PythonCassandraExample(
-        host=config['cassandra_ip'], keyspace=config['cassandra_keyspace'])
-    cass.createsession()
+    now = datetime.datetime.now()
+    print('*'*100)
+    print('processing data')
+    clean_body = udf(lambda body: filter_body(body), StringType())
+    df2 = df.withColumn("cleaned_body", clean_body("review_body"))
+    # df2.take(1)
 
-    categories = config['contegories']
-    for cat in categories:
-        print("*"*100)
-        print('Processing ' + cat)
-        path = data_path + 'product_category=' + str(cat) + '/*.parquet'
-        new_reviews = spark.read.parquet(path)
+    tokenizer = Tokenizer(inputCol="cleaned_body",
+                          outputCol="text_body_tokenized")
+    df3 = tokenizer.transform(df2)
+    # df3.take(1)
 
-        review_rdd = new_reviews.select('customer_id', 'review_body').rdd\
-            .map(lambda x: (x[0], str(x[1])))\
-            .map(lambda x: (x[0], text_cleaning(x[1], stop)))\
-            .filter(lambda x: len(x[1]) > 0)\
-            .map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1)))\
-            .reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
+    stop_words_remover = StopWordsRemover(
+        inputCol="text_body_tokenized", outputCol="text_body_stop_words_removed")
+    df4 = stop_words_remover.transform(df3)
+    # df4.take(1)
 
-        # similarity: Row(id, list(sentence vectors), list(similarity(float)), count)
-        # vote: Row(id, count, fake or not, list(sentence vectors), list(similarity) )
-        fake_account_rdd = review_rdd\
-            .map(lambda x: (x[0], [x.tolist() for x in x[1][0]],
-                            calculate_similarity(x[1][0]), x[1][1]))\
-            .map(lambda x: (x[0], x[3], vote(x[2], x[3], 0.8), x[1], x[2]))\
-            .filter(lambda x: x[1] < 1000)\
-            .map(lambda x: (x[0], x[1], x[2],
-                            [[round(x, 2) for x in vec] for vec in x[3]], x[4]))
+    stem = udf(lambda tokens: lemmatize(tokens), ArrayType(StringType()))
+    df5 = df4.withColumn("text_body_stemmed", stem(
+        "text_body_stop_words_removed"))
+    # df5.take(1)
 
-        print('#'*100)
-        print('RDD ready')
-        print('Transfering to DF')
-        fake_account_df = rdd2DF(fake_account_rdd, sc)
+    sen_embeded = udf(lambda ls: sentence_embeded(
+        ls, model), ArrayType(FloatType()))
+    df6 = df5.withColumn("sen_vec", sen_embeded("text_body_stemmed"))
+    df6 = df6.select("customer_id", "sen_vec")
 
-        print('#'*100)
-        print('creating table')
-        cat = cat.lower().replace('&', '')
-        cass.create_tables(cat)
-        print('#'*100)
-        print('writing data into Cassandra')
-        fake_account_df.write.format("org.apache.spark.sql.cassandra")\
-            .mode('append')\
-            .options(table=cat, keyspace="project")\
-            .save()
-        print('Data Stored in Cassandra')
+    df7 = df6.groupby("customer_id")\
+        .agg(collect_list("sen_vec"))
+    print(df7.take(1))
+
+    print('*'*100)
+    print('done')
+    print(datetime.datetime.now()-now)
 
 
 if __name__ == "__main__":
+    sc = SparkContext()
+    spark = SparkSession(sc)
     main("s3a://amazondata/parquet/")

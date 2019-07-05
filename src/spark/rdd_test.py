@@ -142,75 +142,30 @@ def load_model(sc):
     return model
 
 
-def rdd2DF(rdd, sc):
-    schema = StructType(
-        [
-            StructField("user_id", StringType(), True),
-            StructField("count", IntegerType(), True),
-            StructField("fake", BooleanType(), True),
-            StructField("review", ArrayType(ArrayType(FloatType())), True),
-            StructField("similarity", ArrayType(FloatType()), True)
-        ])
-    sqlContext = SQLContext(sc)
-    users_df = sqlContext.createDataFrame(rdd, schema)
-    users_df.show(3)
-    return users_df
-
-
-def main(data_path):
-    sc = SparkContext()
-    spark = SparkSession(sc)
+def main(path):
+    df = spark.read.parquet(path + "product_category=Apparel/*.parquet")
+    df = df.select('customer_id', 'review_body')
+    now = datetime.datetime.now()
     model = load_model(sc)
-    # Preload stop words
+    print('*'*100)
+    print('processing data')
+
     stop = set(stopwords.words('english'))
-    print('#'*100)
-    print("Spark jobs start")
+    now = datetime.datetime.now()
 
-    cass = cassandra_store.PythonCassandraExample(
-        host=config['cassandra_ip'], keyspace=config['cassandra_keyspace'])
-    cass.createsession()
-
-    categories = config['contegories']
-    for cat in categories:
-        print("*"*100)
-        print('Processing ' + cat)
-        path = data_path + 'product_category=' + str(cat) + '/*.parquet'
-        new_reviews = spark.read.parquet(path)
-
-        review_rdd = new_reviews.select('customer_id', 'review_body').rdd\
-            .map(lambda x: (x[0], str(x[1])))\
-            .map(lambda x: (x[0], text_cleaning(x[1], stop)))\
-            .filter(lambda x: len(x[1]) > 0)\
-            .map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1)))\
-            .reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
-
-        # similarity: Row(id, list(sentence vectors), list(similarity(float)), count)
-        # vote: Row(id, count, fake or not, list(sentence vectors), list(similarity) )
-        fake_account_rdd = review_rdd\
-            .map(lambda x: (x[0], [x.tolist() for x in x[1][0]],
-                            calculate_similarity(x[1][0]), x[1][1]))\
-            .map(lambda x: (x[0], x[3], vote(x[2], x[3], 0.8), x[1], x[2]))\
-            .filter(lambda x: x[1] < 1000)\
-            .map(lambda x: (x[0], x[1], x[2],
-                            [[round(x, 2) for x in vec] for vec in x[3]], x[4]))
-
-        print('#'*100)
-        print('RDD ready')
-        print('Transfering to DF')
-        fake_account_df = rdd2DF(fake_account_rdd, sc)
-
-        print('#'*100)
-        print('creating table')
-        cat = cat.lower().replace('&', '')
-        cass.create_tables(cat)
-        print('#'*100)
-        print('writing data into Cassandra')
-        fake_account_df.write.format("org.apache.spark.sql.cassandra")\
-            .mode('append')\
-            .options(table=cat, keyspace="project")\
-            .save()
-        print('Data Stored in Cassandra')
+    review_rdd = df.select('customer_id', 'review_body').rdd\
+        .map(lambda x: (x[0], str(x[1])))\
+        .map(lambda x: (x[0], text_cleaning(x[1], stop)))\
+        .filter(lambda x: len(x[1]) > 0)\
+        .map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1)))\
+        .reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
+    review_rdd.take(1)
+    print('*'*100)
+    print('done')
+    print(datetime.datetime.now()-now)
 
 
 if __name__ == "__main__":
+    sc = SparkContext()
+    spark = SparkSession(sc)
     main("s3a://amazondata/parquet/")
