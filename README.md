@@ -9,6 +9,11 @@ Have you ever found a product on Amazon website, full of 5 stars reviews, but wh
 
 ![](./img/pipeline.png)
 
+
+## Word2vec Model:
+
+Word2vev is a well know Nature Language Model. It projects each word to a high dimensionaly vector. And I am loading the pre-trained parameters from GloVec to word2vec model, which uses billions of wikipeidia articles to train the word vector.
+
 ## Data Processing:
 
- The reviews data is extracted from S3 datasource. ML pipeline is used for processing and cleaning the text data. The processed data are fed into NLP word2vec model and then conduct text comparison. The results are stored in Cassandra and will be queried by Flask to visualize the result.
+ The reviews data is extracted from S3 datasource. Spark ML pipeline is used for processing and cleaning the text data. The processed data are fed into NLP word2vec model and then conduct text comparison. The results are stored in Cassandra and will be queried by Flask to visualize the results.

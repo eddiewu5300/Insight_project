@@ -6,4 +6,4 @@ spark-submit \
     --executor-memory 5G \
     --total-executor-cores 12 \
     --driver-memory 5G
-    pyspark.pyspark
+    pyspark.py
