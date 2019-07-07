@@ -1,6 +1,4 @@
-# ignore folder name 'data'
 .DS_Store
-test/
 config.py
 glove.6B.50d.txt.word2vec
 glove.6B.50d.txt
