@@ -9,7 +9,7 @@ from cassandra.cluster import Cluster
 from config.config import *
 
 
-class PythonCassandraExample:
+class PythonCassandra:
 
     def __init__(self, host, keyspace):
         self.cluster = None

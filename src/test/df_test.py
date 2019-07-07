@@ -153,28 +153,28 @@ def main(path):
     now = datetime.datetime.now()
     print('*'*100)
     print('processing data')
-    clean_body = udf(lambda body: filter_body(body), StringType())
-    df2 = df.withColumn("cleaned_body", clean_body("review_body"))
+    clean_test = udf(lambda body: filter_body(body), StringType())
+    df2 = df.withColumn("cleaned_text", clean_test("review_body"))
     # df2.take(1)
 
     tokenizer = Tokenizer(inputCol="cleaned_body",
-                          outputCol="text_body_tokenized")
+                          outputCol="text_tokenized")
     df3 = tokenizer.transform(df2)
     # df3.take(1)
 
     stop_words_remover = StopWordsRemover(
-        inputCol="text_body_tokenized", outputCol="text_body_stop_words_removed")
+        inputCol="text_tokenized", outputCol="text_stop_words_removed")
     df4 = stop_words_remover.transform(df3)
     # df4.take(1)
 
     stem = udf(lambda tokens: lemmatize(tokens), ArrayType(StringType()))
-    df5 = df4.withColumn("text_body_stemmed", stem(
-        "text_body_stop_words_removed"))
+    df5 = df4.withColumn("text_stemmed", stem(
+        "text_stop_words_removed"))
     # df5.take(1)
 
     sen_embeded = udf(lambda ls: sentence_embeded(
         ls, model), ArrayType(FloatType()))
-    df6 = df5.withColumn("sen_vec", sen_embeded("text_body_stemmed"))
+    df6 = df5.withColumn("sen_vec", sen_embeded("text_stemmed"))
     df6 = df6.select("customer_id", "sen_vec")
 
     df7 = df6.groupby("customer_id")\
