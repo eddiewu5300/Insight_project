@@ -1,0 +1,13 @@
+.inputSection {
+  display: flex;
+  flex-direction: row;
+}
+
+#my-dropdown {
+  width: 1000px;
+}
+
+body {
+    padding: 5%;
+}
+
