@@ -3,9 +3,10 @@
 ## Table of Contents
 1. [Introduction](README.md#Introduction)
 2. [Pipeline](README.md#Pipeline)
-3. [Requirements](README.md#Requirements)
-4. [Environment Setup](README.md#Environment%20Setup)
-5. [Run Instructions](README.md#Run%20Instructions)
+3. [Global Vector Model](README.md#Global%20Vector%20Model)
+4. [Requirements](README.md#Requirements)
+5. [Environment Setup](README.md#Environment%20Setup)
+
 
 
 ## Introduction
@@ -22,13 +23,52 @@ Text comparison process:
 2. Sentense embedding with pretrained tfidf model
 3. Calculate cosine similarity between each pair of review vectors 
 
+Depends on how many similar reviews one user has, a customized algorithms decides which account is fake and store the information in the Cassandra.
+
+Airflow schedules a daily job to trigger Spark update the database when new reviews come in.
 ![](./img/pipeline.png)
 
 
-## Word2vec Model:
+## Global Vector Model:
 
-Word2vev is a well know Nature Language Model. It projects each word to a high dimensionaly vector. And I am loading the pre-trained parameters from GloVec to word2vec model, which uses billions of wikipeidia articles to train the word vector.
+Global Vector is a well know Nature Language Model. It projects each word to a high dimensionaly vector. And I am loading the pre-trained parameters trained by google team, which uses millions of wikipeidia articles to train the word vector.
+[Read more](https://nlp.stanford.edu/projects/glove/)
 
-## Data Processing:
 
- The reviews data is extracted from S3 datasource. Spark ML pipeline is used for processing and cleaning the text data. The processed data are fed into NLP word2vec model and then conduct text comparison. The results are stored in Cassandra and will be queried by Flask to visualize the results.
+## 
+
+
+## Requirements
+
+* Amazon AWS Account
+* Cassandra Cluster with Cassandra installed
+* Spark Cluster with Spark, Cassandra-connector installed
+* Flask node with Flask, Dash installed
+* Airflow node with Airflow, Postgres installed
+
+## Environment Setup:
+
+**Cassandra**
+##### To use python cassandra
+- sudo pip install cassandra-driver
+
+##### To use spark cassandra connector
+Download from [here](http://www.apache.org/dyn/closer.lua/cassandra/3.11.3/apache-cassandra-3.11.3-bin.tar.gz)
+
+Follow instructions for Installing from binary tarball [here](http://cassandra.apache.org/doc/latest/getting_started/installing.html)
+
+In cqlsh:
+- create keyspace project;
+- create keyspace project with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 2 };
+
+For cassandra-spark connector:
+
+Following instructions from: https://www.codementor.io/sheena/installing-cassandra-spark-linux-debian-ubuntu-14-du107vbhx
+
+- git clone https://github.com/datastax/spark-cassandra-connector.git
+- cd spark-cassandra-connector/
+- git ch v2.3.2
+- ./sbt/sbt assembly
+- cp spark-cassandra-connector/target/full/scala-2.11/spark-cassandra-connector-assembly-2.3.2.jar ~
+- spark-shell --jars ~/spark-cassandra-connector-assembly-2.3.2.jar --conf spark.cassandra.connection.host="10.0.0.7"
+
