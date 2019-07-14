@@ -11,19 +11,21 @@
 
 ## Introduction
 
-Have you ever found a product on Amazon website, full of 5 stars reviews, but when you got the product it's totally not you expected and felt disappointed? A report from Washington Post shows that Majority of reviews in certain Amazon product categories are fraudulent or paid. Company hires professtional reviewers or robots to post glowing reviews to themselves or attack their competitiors. My project uses 100G of Amazon reviews data to detect potential fake accounts on Amazon and gives warning to them when they are reading the reviews so that shoppers will think twice before buy the product. 
+Have you ever found a product on Amazon website, full of 5 stars reviews, you thought you would love it and decided to buy it home. But when you got the product it's totally not you expected and felt disappointed? 
+
+A report from the Washington Post shows that the majority of reviews in certain Amazon product categories are fraudulent or paid. Companies hire professional reviewers or robots to post glowing reviews to themselves or attack their competitors. My project uses 100G of Amazon reviews data to detect potential fake accounts on Amazon and gives warning to them when they are reading the reviews so that shoppers will think twice before buying the product.
 
 
 ## Pipeline:
 
-The Amazon customer reviews data is stored in AWS S3. Spark reads the reviews and runs NLP preprocessing using spark Machine Learning Pipeline library including tokenization and stopwords remover. A external pretrained NLP model, Global Vector, is used for text comparison. 
+The Amazon customer reviews data is stored in AWS S3. Spark reads the reviews and runs NLP preprocessing using spark Machine Learning Pipeline library including tokenization and stopwords remover. External pre-trained NLP models, Global Vector and tfidf, are used for text comparison. 
 
 Text comparison process:
-1. Word embedding with pretrained Global Vector model
-2. Sentense embedding with pretrained tfidf model
+1. Word embedding with pre-trained Global Vector model
+2. Sentence embedding with pre-trained tfidf model
 3. Calculate cosine similarity between each pair of review vectors 
 
-Depends on how many similar reviews one user has, a customized algorithms decides which account is fake and store the information in the Cassandra.
+Depends on how many similar reviews one user has, a customized algorithm decides which account is fake and store the information in the Cassandra.
 
 Airflow schedules a daily job to trigger Spark update the database when new reviews come in.
 ![](./img/pipeline.png)
@@ -31,11 +33,8 @@ Airflow schedules a daily job to trigger Spark update the database when new revi
 
 ## Global Vector Model:
 
-Global Vector is a well know Nature Language Model. It projects each word to a high dimensionaly vector. And I am loading the pre-trained parameters trained by google team, which uses millions of wikipeidia articles to train the word vector.
+Global Vector is a well known Nature Language Model. It projects each word to a high dimensionaly vector. And I am loading the pre-trained parameters trained by google team, which uses millions of wikipeidia articles to train the word vector.
 [Read more](https://nlp.stanford.edu/projects/glove/)
-
-
-## 
 
 
 ## Requirements
