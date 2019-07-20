@@ -40,22 +40,35 @@ def load_model(sc):
     return model
 
 
-def text_cleaning(sentence, stop):
+def load_model(sc):
     """
-    Remove the punctuation & stop words
-    sentence - str type
-    return list of proccessed str
+    Load global Vec model
     """
-    lemmatizer = WordNetLemmatizer()
-    sentence = sentence.lower()
+    now = datetime.datetime.now()
+    print('loading model')
+    model = KeyedVectors.load_word2vec_format(
+        'glove.6B.50d.txt.word2vec', binary=False)
+    print('model loading time')
+    print(str(datetime.datetime.now()-now) + 'sec')
+    model_broadcast = sc.broadcast(model)
+    return model
+
+
+def lemmatize(tokens):
+    wordnet_lemmatizer = WordNetLemmatizer()
+    stems = [wordnet_lemmatizer.lemmatize(token)
+             for token in tokens if len(token) > 1]
+    return stems
+
+
+def filter_body(body):
     cleanr = re.compile('<.*?>')
-    sentence = re.sub(cleanr, ' ', sentence)
-    sentence = re.sub(r'[?|!|\'|"|#]', r'', sentence)
-    sentence = re.sub(r'[.|,|)|(|\|/]', r' ', sentence)
-    sentence = re.sub(r'\d+', r' ', sentence)
-    words = [lemmatizer.lemmatize(word) for word in sentence.split(
-    ) if word not in stop and len(word) > 1]
-    return words
+    body = re.sub(cleanr, '', str(body))
+    body = re.sub(r'[?|!|\'|"|#]', "", body)
+    body = re.sub(r"[^\w\s]", "", body)
+    body = re.sub(r'[.|,|)|(|\|/]', "", body)
+    body = re.sub(r'\d+', r'', body)
+    return str(body)
 
 
 def get_word2vec(sentence, model):
@@ -71,7 +84,6 @@ def get_word2vec(sentence, model):
             vec = model.wv[tmp]
         except:
             vec = np.repeat(0.0, 50)
-        # vec_.append(np.round(vec, 5))
         vec_.append(vec)
     return vec_
 
@@ -99,10 +111,12 @@ def sentence_embeded(sentence, model):
     """
     weight = get_tfidf(sentence)
     word_vector = get_word2vec(sentence, model)
-    weighted_sentence = [np.round(x * y, 2)
+    weighted_sentence = [x * y
                          for x, y in zip(weight, word_vector)]
     embeded_sentence = sum(weighted_sentence)
-    return (embeded_sentence)
+    embeded_sentence = np.round(embeded_sentence, 2)
+    embeded_sentence = embeded_sentence.tolist()
+    return embeded_sentence
 
 
 def vote(sim, count, treshold):
@@ -143,8 +157,9 @@ def update_data(id, new_reviews, new_count, session, table):
     if count == 'user not in database':
         new_reviews = [x.tolist() for x in new_reviews]
         session.execute(
-            "INSERT INTO {} (user_id, count, fake, review, similarity) VALUES('{}',{},{},{},{});"
-            .format(table, id, new_count, False, new_reviews, [])
+            """
+            INSERT INTO {} (user_id, count, fake, review, similarity) VALUES('{}',{},{},{},{});
+            """.format(table, id, new_count, False, new_reviews, [])
         )
     else:
         for new_review in new_reviews:
@@ -156,8 +171,9 @@ def update_data(id, new_reviews, new_count, session, table):
         count += new_count
         fake = vote(similarity, count, 0.8)
         session.execute(
-            "UPDATE {} SET count={}, fake={}, review={}, similarity={} WHERE user_id='{}';"
-            .format(table, count, fake, reviews, similarity, id)
+            """
+            UPDATE {} SET count={}, fake={}, review={}, similarity={} WHERE user_id='{}';
+            """.format(table, count, fake, reviews, similarity, id)
         )
 
 
@@ -171,7 +187,7 @@ def main(data_path):
     print("Spark jobs start")
 
     cass = cassandra_store.PythonCassandraExample(
-        host=["10.0.0.13"], keyspace="project")
+        host=["10.0.0.13, 10.0.0.7"], keyspace="project")
     cass.createsession()
 
     for cat in config['categories']:
@@ -179,16 +195,38 @@ def main(data_path):
         print('Processing ' + cat)
         path = data_path + 'new_reviews' + str(cat) + '/*.parquet'
         new_reviews = spark.read.parquet(path)
-        # output Row((id, (list(sentence vectors), count)))
-        review_rdd = new_reviews.select('customer_id', 'review_body').rdd\
-            .map(lambda x: (x[0], str(x[1])))\
-            .map(lambda x: (x[0], text_cleaning(x[1], stop)))\
-            .filter(lambda x: len(x[1]) > 0)\
-            .map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1)))\
-            .reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
 
-        #review_rdd = new_reviews.select('customer_id', 'review_body').rdd.map(lambda x: (x[0], str(x[1]))).map(lambda x: (x[0], text_cleaning(x[1], stop))).filter(lambda x: len(x[1]) > 0).map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1))).reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
-        collection = review_rdd.collect()
+        clean_test = udf(lambda body: filter_body(body), StringType())
+        cleaned_reviews = new_reviews.withColumn(
+            "cleaned_text", clean_test("review_body"))
+
+        tokenizer = Tokenizer(inputCol="cleaned_body",
+                              outputCol="tokenized")
+        tokenized = tokenizer.transform(cleaned_reviews)
+
+        stop_words_remover = StopWordsRemover(
+            inputCol="tokenized", outputCol="stop_words_removed")
+        stop_word_removed = stop_words_remover.transform(tokenized)
+
+        lemmatizer = udf(lambda tokens: lemmatize(
+            tokens), ArrayType(StringType()))
+        lemmatized = stop_word_removed.withColumn(
+            "stemmed", lemmatizer("stop_words_removed"))
+
+        sen_embeder = udf(lambda ls: sentence_embeded(
+            ls, model), ArrayType(FloatType()))
+        sen_embeded = lemmatized.withColumn("sen_vec", sen_embeder("stemmed"))
+
+        df = sen_embeded.select("customer_id", "sen_vec")
+
+        df_reduce = df.groupby("customer_id")\
+            .agg(
+                collect_list("sen_vec").alias("reviews"),
+            count(lit(1)).alias("count")
+        )
+        # output Row((id, (list(sentence vectors), count)))
+
+        collection = df_reduct.collect()
 
         cat = cat.lower().replace('&', '')
         for user_review in collection:
