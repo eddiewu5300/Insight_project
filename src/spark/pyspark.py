@@ -219,6 +219,7 @@ def main(data_path):
 
         print('#'*100)
         print('writing data into Cassandra')
+        cat = cat.lower().replace('&', '')
         vote_df.write.format("org.apache.spark.sql.cassandra")\
             .mode('append')\
             .options(table=cat, keyspace="project")\
