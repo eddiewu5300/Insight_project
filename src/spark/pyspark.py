@@ -1,28 +1,19 @@
-# pyspark --conf spark.cassandra.connection.host="10.0.0.13" --master spark://ip-10-0-0-11:7077 --conf spark.executor.memoryOverhead=600 --executor-memory 6G --driver-memory 6G
-# spark-submit --conf spark.cassandra.connection.host="10.0.0.13" --master spark://ip-10-0-0-11:7077 --conf spark.executor.memoryOverhead=600 --executor-memory 5G --total-executor-cores 12 --driver-memory 5G
-import sys
-import os
-import configparser
-from pyspark.sql.types import *
-from pyspark.sql import SQLContext
-from pyspark import SparkContext
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import udf, concat, col, lit
+from pyspark import SparkContext
+from pyspark.sql import SQLContext
+from pyspark.sql.functions import collect_set, collect_list, count, udf, concat, col, lit
+from pyspark.ml.feature import Tokenizer
+from pyspark.ml.feature import StopWordsRemover
+from pyspark.sql.types import *
 from collections import Counter
 import logging
 from gensim.models.keyedvectors import KeyedVectors
 from nltk.stem import WordNetLemmatizer
-import warnings
-from nltk.stem import PorterStemmer
-from nltk.corpus import stopwords
-import nltk
+import wikiwords
+# nltk.download("wordnet")
 from sklearn.metrics.pairwise import cosine_similarity
 import math
-import wikiwords
-# import config
 import datetime
-import sys
-import os
 import re
 import time
 import numpy as np
@@ -30,27 +21,37 @@ import numpy as np
 from itertools import combinations
 from cassandra import cassandra_store
 from config.config import *
-# nltk.download("wordnet")
-# nltk.download("stopwords")
-warnings.filterwarnings("ignore")
 
 
-def text_cleaning(sentence, stop):
+def load_model(sc):
     """
-    Remove the punctuation & stop words
-    sentence - str type
-    return list of proccessed str
+    Load global Vec model
     """
-    lemmatizer = WordNetLemmatizer()
-    sentence = sentence.lower()
+    now = datetime.datetime.now()
+    print('loading model')
+    model = KeyedVectors.load_word2vec_format(
+        'glove.6B.50d.txt.word2vec', binary=False)
+    print('model loading time')
+    print(str(datetime.datetime.now()-now) + 'sec')
+    model_broadcast = sc.broadcast(model)
+    return model
+
+
+def lemmatize(tokens):
+    wordnet_lemmatizer = WordNetLemmatizer()
+    stems = [wordnet_lemmatizer.lemmatize(token)
+             for token in tokens if len(token) > 1]
+    return stems
+
+
+def filter_body(body):
     cleanr = re.compile('<.*?>')
-    sentence = re.sub(cleanr, ' ', sentence)
-    sentence = re.sub(r'[?|!|\'|"|#]', r'', sentence)
-    sentence = re.sub(r'[.|,|)|(|\|/]', r' ', sentence)
-    sentence = re.sub(r'\d+', r' ', sentence)
-    words = [lemmatizer.lemmatize(word) for word in sentence.split(
-    ) if word not in stop and len(word) > 1]
-    return words
+    body = re.sub(cleanr, '', str(body))
+    body = re.sub(r'[?|!|\'|"|#]', "", body)
+    body = re.sub(r"[^\w\s]", "", body)
+    body = re.sub(r'[.|,|)|(|\|/]', "", body)
+    body = re.sub(r'\d+', r'', body)
+    return str(body)
 
 
 def get_word2vec(sentence, model):
@@ -66,7 +67,6 @@ def get_word2vec(sentence, model):
             vec = model.wv[tmp]
         except:
             vec = np.repeat(0.0, 50)
-        # vec_.append(np.round(vec, 5))
         vec_.append(vec)
     return vec_
 
@@ -94,9 +94,11 @@ def sentence_embeded(sentence, model):
     """
     weight = get_tfidf(sentence)
     word_vector = get_word2vec(sentence, model)
-    weighted_sentence = [np.round(x * y, 2)
+    weighted_sentence = [x * y
                          for x, y in zip(weight, word_vector)]
     embeded_sentence = sum(weighted_sentence)
+    embeded_sentence = np.round(embeded_sentence, 2)
+    embeded_sentence = embeded_sentence.tolist()
     return embeded_sentence
 
 
@@ -117,7 +119,6 @@ def vote(sim, count, treshold):
 def calculate_similarity(ls):
     """
     ls - a list of vec
-    each vec is a numpy array
     return a list of similarity of pair of reviews
     """
     result = []
@@ -128,41 +129,10 @@ def calculate_similarity(ls):
     return result
 
 
-def load_model(sc):
-    """
-    Load word2vec model
-    """
-    now = datetime.datetime.now()
-    print('loading model')
-    model = KeyedVectors.load_word2vec_format(
-        'glove.6B.50d.txt.word2vec', binary=False)
-    print('model loading time')
-    print(str(datetime.datetime.now()-now) + 'sec')
-    model_broadcast = sc.broadcast(model)
-    return model
-
-
-def rdd2DF(rdd, sc):
-    schema = StructType(
-        [
-            StructField("user_id", StringType(), True),
-            StructField("count", IntegerType(), True),
-            StructField("fake", BooleanType(), True),
-            StructField("review", ArrayType(ArrayType(FloatType())), True),
-            StructField("similarity", ArrayType(FloatType()), True)
-        ])
-    sqlContext = SQLContext(sc)
-    users_df = sqlContext.createDataFrame(rdd, schema)
-    users_df.show(3)
-    return users_df
-
-
 def main(data_path):
     sc = SparkContext()
     spark = SparkSession(sc)
     model = load_model(sc)
-    # Preload stop words
-    stop = set(stopwords.words('english'))
     print('#'*100)
     print("Spark jobs start")
 
@@ -175,37 +145,82 @@ def main(data_path):
         print("*"*100)
         print('Processing ' + cat)
         path = data_path + 'product_category=' + str(cat) + '/*.parquet'
-        new_reviews = spark.read.parquet(path)
+        reviews = spark.read.parquet(path)
 
-        review_rdd = new_reviews.select('customer_id', 'review_body').rdd\
-            .map(lambda x: (x[0], str(x[1])))\
-            .map(lambda x: (x[0], text_cleaning(x[1], stop)))\
-            .filter(lambda x: len(x[1]) > 0)\
-            .map(lambda x: (x[0], ([sentence_embeded(x[1], model)], 1)))\
-            .reduceByKey(lambda a, b: (a[0]+b[0],  a[1]+a[1]))
+        ##########################################################
+        # save the raw text table
+        df2 = reviews.selectExpr('customer_id', 'review_id', 'product_id',
+                                 'product_title', 'star_rating', 'review_body', "'{}' as category".format(cat))
+        df3 = df2.dropDuplicates()
+
+        lower_case = udf(lambda string: string.lower(), StringType())
+        df4 = df3.withColumn("product_title", lower_case('product_title'))
+
+        print('#'*100)
+        print('creating raw text table')
+        cat1 = cat.lower().replace('&', '') + '_text'
+        cass.create_text_tables(cat1)
+        print('creating index')
+        cass.create_text_index(cat1)
+
+        df4.write.format("org.apache.spark.sql.cassandra")\
+            .mode('append')\
+            .options(table=cat1, keyspace="project")\
+            .save()
+        print('Text Data Stored in Cassandra')
+
+        ##########################################################
+        # process fake account information
+
+        # text processing
+        clean_test = udf(lambda body: filter_body(body), StringType())
+        cleaned_reviews = reviews.withColumn(
+            "cleaned_text", clean_test("review_body"))
+
+        # tokenization
+        tokenizer = Tokenizer(inputCol="cleaned_body",
+                              outputCol="tokenized")
+        tokenized = tokenizer.transform(cleaned_reviews)
+
+        # remove stop words
+        stop_words_remover = StopWordsRemover(
+            inputCol="tokenized", outputCol="stop_words_removed")
+        stop_word_removed = stop_words_remover.transform(tokenized)
+
+        # lemmatization
+        lemmatizer = udf(lambda tokens: lemmatize(
+            tokens), ArrayType(StringType()))
+        lemmatized = stop_word_removed.withColumn(
+            "stemmed", lemmatizer("stop_words_removed"))
+
+        # sentence embedding(word embedding * tfidf)
+        sen_embeder = udf(lambda ls: sentence_embeded(
+            ls, model), ArrayType(FloatType()))
+        sen_embeded = lemmatized.withColumn("sen_vec", sen_embeder("stemmed"))
+
+        df = sen_embeded.select("customer_id", "sen_vec")
+
+        # reduce by user_id
+        df_reduce = df.groupby("customer_id")\
+            .agg(
+                collect_list("sen_vec").alias("reviews"),
+            count(lit(1)).alias("count")
+        )
 
         # similarity: Row(id, list(sentence vectors), list(similarity(float)), count)
+        similarity_cal = udf(lambda ls: calculate_similarity(
+            ls), ArrayType(FloatType()))
+        sim_df = df_reduce.withColumn("similarity", similarity_cal("reviews"))
+
         # vote: Row(id, count, fake or not, list(sentence vectors), list(similarity) )
-        fake_account_rdd = review_rdd\
-            .map(lambda x: (x[0], [x.tolist() for x in x[1][0]],
-                            calculate_similarity(x[1][0]), x[1][1]))\
-            .map(lambda x: (x[0], x[3], vote(x[2], x[3], 0.8), x[1], x[2]))\
-            .filter(lambda x: x[1] < 1000)\
-            .map(lambda x: (x[0], x[1], x[2],
-                            [[round(x, 2) for x in vec] for vec in x[3]], x[4]))
+        voter = udf(lambda ls: vote(
+            ls, lit("count"), treshold=0.9), BooleanType())
+        vote_df = sim_df.withColumn("fake", voter("similartity"))
 
-        print('#'*100)
-        print('RDD ready')
-        print('Transfering to DF')
-        fake_account_df = rdd2DF(fake_account_rdd, sc)
-
-        print('#'*100)
-        print('creating table')
-        cat = cat.lower().replace('&', '')
-        cass.create_tables(cat)
         print('#'*100)
         print('writing data into Cassandra')
-        fake_account_df.write.format("org.apache.spark.sql.cassandra")\
+        cat = cat.lower().replace('&', '')
+        vote_df.write.format("org.apache.spark.sql.cassandra")\
             .mode('append')\
             .options(table=cat, keyspace="project")\
             .save()

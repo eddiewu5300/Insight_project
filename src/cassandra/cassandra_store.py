@@ -9,7 +9,7 @@ from cassandra.cluster import Cluster
 from config.config import *
 
 
-class PythonCassandraExample:
+class PythonCassandra:
 
     def __init__(self, host, keyspace):
         self.cluster = None
@@ -65,3 +65,29 @@ class PythonCassandraExample:
                 """.format(str(table))
         self.session.execute(c_sql)
         print(str(table)+" Table Created !!!")
+
+    def create_text_tables(self, table):
+        c_sql = """
+                CREATE TABLE project.{} (
+                customer_id text PRIMARY KEY,
+                product_id text,
+                product_title text,
+                review_body text,
+                review_id text,
+                star_rating int
+            );
+            """.format(str(table))
+        self.session.execute(c_sql)
+        print(str(table)+" Text Table Created !!!")
+
+    def create_text_index(self, table):
+        c_sql = """
+        CREATE CUSTOM INDEX query ON project.tmp (product_title) 
+        USING 'org.apache.cassandra.index.sasi.SASIIndex' 
+        WITH OPTIONS = 
+        {'mode': 'CONTAINS', 
+        'analyzer_class': 'org.apache.cassandra.index.sasi.analyzer.NonTokenizingAnalyzer', 
+        'case_sensitive': 'false'};
+        """.format(str(table))
+        self.session.execute(c_sql)
+        print(str(table)+" Text Index Created !!!")
