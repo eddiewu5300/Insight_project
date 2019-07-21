@@ -33,7 +33,7 @@ Airflow schedules a daily job to trigger Spark update the database when new revi
 
 ## Global Vector Model:
 
-Global Vector is a well known Nature Language Model. It projects each word to a high dimensionaly vector. And I am loading the pre-trained parameters trained by google team, which uses millions of wikipeidia articles to train the word vector.
+Global Vector is a well known Nature Language Model. It projects each word to a high dimensionaly vector. And I am loading the pre-trained word vectors trained by google team, which uses millions of wikipeidia articles to train the word vectors.
 [Read more](https://nlp.stanford.edu/projects/glove/)
 
 
