@@ -28,7 +28,7 @@ Text comparison process:
 Depends on how many similar reviews one user has, a customized algorithm decides which account is fake and store the information in the Cassandra.
 
 Airflow schedules a daily job to trigger Spark update the database when new reviews come in.
-![](./img/pipeline.png)
+![](./img/pipeLines.png)
 
 
 ## Global Vector Model:
