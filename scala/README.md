@@ -1,5 +1,5 @@
 ### Run the commands
-`./scala/sbt assembly`
+`./scala/sbt assembly`  
 
 `cp scala/target/scala-2.11/project-assembly-1.0.jar $SPARK_HOME/jars`  
 
