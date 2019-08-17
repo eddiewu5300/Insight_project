@@ -157,8 +157,8 @@ def main(data_path):
         df4 = df3.withColumn("product_title", lower_case('product_title'))
 
         print('#'*100)
-        print('creating raw text table')
-        cat1 = cat.lower().replace('&', '') + '_text'
+        print('creating raw review table')
+        cat1 = cat.lower().replace('&', '') + '_review'
         cass.create_text_tables(cat1)
         print('creating index')
         cass.create_text_index(cat1)
@@ -167,7 +167,7 @@ def main(data_path):
             .mode('append')\
             .options(table=cat1, keyspace="project")\
             .save()
-        print('Text Data Stored in Cassandra')
+        print('Review Data Stored in Cassandra')
 
         ##########################################################
         # process fake account information

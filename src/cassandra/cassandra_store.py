@@ -67,7 +67,6 @@ class PythonCassandra:
         print(str(table)+" Table Created !!!")
 
     def create_text_tables(self, table):
-        table = table + "_review"
         c_sql = """
                 CREATE TABLE project.{} (
                 customer_id text PRIMARY KEY,
@@ -82,7 +81,6 @@ class PythonCassandra:
         print(str(table)+" Text Table Created !!!")
 
     def create_text_index(self, table):
-        table = table + "_review"
         c_sql = """
         CREATE CUSTOM INDEX query ON project.tmp (product_title) 
         USING 'org.apache.cassandra.index.sasi.SASIIndex' 
