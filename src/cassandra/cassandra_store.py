@@ -39,16 +39,16 @@ class PythonCassandra:
             "SELECT keyspace_name FROM system_schema.keyspaces")
         if keyspace in [row[0] for row in rows]:
             if drop:
-                self.log.info("dropping existing keyspace...")
+                print("dropping existing keyspace...")
                 self.session.execute("DROP KEYSPACE " + keyspace)
             else:
-                self.log.info("existing keyspace, not doing anything...")
+                print("existing keyspace, not doing anything...")
                 return
 
         print("creating keyspace...")
         self.session.execute("""
                 CREATE KEYSPACE %s
-                WITH replication = { 'class': 'SimpleStrategy', 'replication_factor': '1' }
+                WITH replication = { 'class': 'SimpleStrategy', 'replication_factor': '2' }
                 """ % keyspace)
 
         print("setting keyspace...")
@@ -67,6 +67,7 @@ class PythonCassandra:
         print(str(table)+" Table Created !!!")
 
     def create_text_tables(self, table):
+        table = table + "_review"
         c_sql = """
                 CREATE TABLE project.{} (
                 customer_id text PRIMARY KEY,
@@ -81,6 +82,7 @@ class PythonCassandra:
         print(str(table)+" Text Table Created !!!")
 
     def create_text_index(self, table):
+        table = table + "_review"
         c_sql = """
         CREATE CUSTOM INDEX query ON project.tmp (product_title) 
         USING 'org.apache.cassandra.index.sasi.SASIIndex' 
