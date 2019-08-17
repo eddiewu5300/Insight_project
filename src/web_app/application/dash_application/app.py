@@ -24,6 +24,12 @@ def connect_cassandra_cluster():
     
 
 def get_data(input_text, table, session):
+    """
+    Get the reviews data relative to product
+    input_text - string type (the product)
+    table - string type (the category)
+    session - cassandra session 
+    """
     table = table + "_review"
     if len(input_text) <= 0:
         command = "SELECT customer_id, star_rating, review_body FROM {} ORDER BY review_id ASC LIMIT 20;".format(
@@ -41,6 +47,12 @@ def get_data(input_text, table, session):
 
 
 def get_fake(ls_id, table, session):
+    """
+    Get the fake account information 
+    ls_id - array type (a list of ip we want to query)
+    table - string type (the category)
+    session - cassandra session 
+    """
     fake_list = []
     for id in ls_id:
         try:
@@ -61,7 +73,7 @@ def generate_table(input_text, table, session):
     df.rename(columns={0: "User ID",
                        1: "Star", 2: "Review"}, inplace=True)
     ls_id = df['User ID']
-    fake_list = get_fake(ls_id, session)
+    fake_list = get_fake(ls_id, table, session)
     fake_list = [html.Div(children='Warning', style={
                           'color': 'red'}) if x == True else '' for x in fake_list]
     df.insert(0, 'Fake', fake_list)
