@@ -44,6 +44,7 @@ Global Vector is a well known Nature Language Model. It projects each word to a 
 * Spark Cluster with Spark, Cassandra-connector installed
 * Flask node with Flask, Dash installed
 * Airflow node with Airflow, Postgres installed
+* [Python Libraries](.python_requirements.txt)  
 
 ## Environment Setup:
 
