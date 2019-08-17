@@ -39,16 +39,16 @@ class PythonCassandra:
             "SELECT keyspace_name FROM system_schema.keyspaces")
         if keyspace in [row[0] for row in rows]:
             if drop:
-                self.log.info("dropping existing keyspace...")
+                print("dropping existing keyspace...")
                 self.session.execute("DROP KEYSPACE " + keyspace)
             else:
-                self.log.info("existing keyspace, not doing anything...")
+                print("existing keyspace, not doing anything...")
                 return
 
         print("creating keyspace...")
         self.session.execute("""
                 CREATE KEYSPACE %s
-                WITH replication = { 'class': 'SimpleStrategy', 'replication_factor': '1' }
+                WITH replication = { 'class': 'SimpleStrategy', 'replication_factor': '2' }
                 """ % keyspace)
 
         print("setting keyspace...")

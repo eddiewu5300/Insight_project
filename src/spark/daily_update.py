@@ -3,7 +3,7 @@ from pyspark.sql.types import *
 from pyspark.sql import SQLContext
 from pyspark import SparkContext
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import udf, concat, col, lit
+from pyspark.sql.functions import collect_set, collect_list, count, udf, concat, col, lit
 from collections import Counter
 import logging
 from gensim.models.keyedvectors import KeyedVectors
@@ -23,26 +23,13 @@ import re
 import time
 import numpy as np
 from itertools import combinations
+from cassandra import cassandra_store
 from config.cofig import *
 
 
 def load_model(sc):
     """
     Load word2vec model
-    """
-    now = datetime.datetime.now()
-    print('loading model')
-    model = KeyedVectors.load_word2vec_format(
-        'glove.6B.50d.txt.word2vec', binary=False)
-    print('model loading time')
-    print(str(datetime.datetime.now()-now) + 'sec')
-    model_broadcast = sc.broadcast(model)
-    return model
-
-
-def load_model(sc):
-    """
-    Load global Vec model
     """
     now = datetime.datetime.now()
     print('loading model')
@@ -133,7 +120,7 @@ def vote(sim, count, treshold):
         return False
 
 
-def query_from_cassandra(id, session, keyspace='project', table):
+def query_from_cassandra(id, session, table, keyspace='project'):
     """
     id - a user id, primary key in cassandra
     return the value from key
@@ -187,7 +174,7 @@ def main(data_path):
     print("Spark jobs start")
 
     cass = cassandra_store.PythonCassandraExample(
-        host=["10.0.0.13, 10.0.0.7"], keyspace="project")
+        host=["10.0.0.13, 10.0.0.7, 10.0.0.5"], keyspace="project")
     cass.createsession()
 
     for cat in config['categories']:
@@ -222,11 +209,11 @@ def main(data_path):
         df_reduce = df.groupby("customer_id")\
             .agg(
                 collect_list("sen_vec").alias("reviews"),
-            count(lit(1)).alias("count")
+                count(lit(1)).alias("count")
         )
         # output Row((id, (list(sentence vectors), count)))
 
-        collection = df_reduct.collect()
+        collection = df_reduce.collect()
 
         cat = cat.lower().replace('&', '')
         for user_review in collection:

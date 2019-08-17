@@ -14,53 +14,50 @@ from cassandra.cluster import Cluster
 import dash_table
 import glob
 from pathlib import Path
-#from config.config import *
 
 
-def fetchData(command):
-    try:
-        connection = psycopg2.connect(user="postgres",
-                                      password="123",
-                                      host="10.0.0.5",
-                                      port="5432",
-                                      database="project")
-        cursor = connection.cursor()
 
-        # Print PostgreSQL version
-        cursor.execute(command)
-        record = cursor.fetchall()
-        print("query done" + "\n")
-    except (Exception, psycopg2.Error) as error:
-        print("Error while connecting to PostgreSQL", error)
-    finally:
-        # closing database connection.
-        if(connection):
-            cursor.close()
-            connection.close()
-            print("PostgreSQL connection is closed")
-    return record
+def connect_cassandra_cluster():
+    cluster = Cluster(['10.0.0.13','10.0.0.7','10.0.0.5'])
+    session = cluster.connect('project')
+    return session
+    
 
-# Note: dash's category has the tag "imUrl" instead of "category"
-
-
-def get_data(input_text, table):
+def get_data(input_text, table, session):
+    """
+    Get the reviews data relative to product
+    input_text - string type (the product)
+    table - string type (the category)
+    session - cassandra session 
+    """
+    table = table + "_review"
     if len(input_text) <= 0:
         command = "SELECT customer_id, star_rating, review_body FROM {} ORDER BY review_id ASC LIMIT 20;".format(
             table)
     else:
-        command = "SELECT customer_id, star_rating, review_body FROM {}  WHERE product_title LIKE '%{}%' ORDER BY review_id ASC  LIMIT 30;".format(
+        command = "SELECT customer_id, star_rating, review_body FROM {}  WHERE product_title LIKE '%{}%' ORDER BY review_id ASC LIMIT 30;".format(
             table, input_text)
-    return fetchData(command)
+    try:
+        data = session.execute(command)
+    except:
+        print("Error while connecting to Cassandra")
+        data = [[]]
+    return data
+    
 
 
-def get_fake(ls_id):
+def get_fake(ls_id, table, session):
+    """
+    Get the fake account information 
+    ls_id - array type (a list of ip we want to query)
+    table - string type (the category)
+    session - cassandra session 
+    """
     fake_list = []
-    cluster = Cluster(['10.0.0.13'])
-    session = cluster.connect('project')
     for id in ls_id:
         try:
             row = session.execute(
-                "SELECT * from apparel where user_id='{}';".format(id))[0]
+                "SELECT * from {} where user_id='{}';".format(table, id))[0]
             fake = row[2]
             fake_list.append((fake))
         except:
@@ -69,14 +66,14 @@ def get_fake(ls_id):
     return fake_list
 
 
-# # Create a table based on the dataframe I created
-def generate_table(input_text, table):
-    data = get_data(input_text, table)
+
+def generate_table(input_text, table, session):
+    data = get_data(input_text, table, session)
     df = pd.DataFrame([ij for ij in i] for i in data)
     df.rename(columns={0: "User ID",
                        1: "Star", 2: "Review"}, inplace=True)
     ls_id = df['User ID']
-    fake_list = get_fake(ls_id)
+    fake_list = get_fake(ls_id, table, session)
     fake_list = [html.Div(children='Warning', style={
                           'color': 'red'}) if x == True else '' for x in fake_list]
     df.insert(0, 'Fake', fake_list)
@@ -96,8 +93,6 @@ def generate_table(input_text, table):
 def Add_Dash(server):
     """Create a Dash app."""
     external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
-    # external_scripts = ['/static/dist/js/includes/jquery.min.js',
-    #                     '/static/dist/js/main.js']
     dash_app = dash.Dash(__name__, external_stylesheets=external_stylesheets,
                          routes_pathname_prefix='/dashapp/')
 
@@ -141,4 +136,5 @@ def init_callbacks(dash_app):
                   [Input('input-productname', 'value'),
                    Input('my-dropdown', 'value')])
     def update_output(input1, input2):
-        return generate_table(input1.lower(), input2)
+        session = connect_cassandra_cluster()
+        return generate_table(input1.lower(), input2, session)
