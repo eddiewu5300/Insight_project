@@ -1,3 +1,6 @@
+### Scala
+This section is using Scala to reimplement the spark batch processing of the project. 
+
 ### Run the commands
 `./scala/sbt assembly`  
 
