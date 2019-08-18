@@ -14,6 +14,7 @@
 Have you ever found a product on Amazon website, full of 5 stars reviews, you thought you would love it and decided to buy it home. But when you got the product it's totally not you expected and felt disappointed? 
 
 A report from the Washington Post shows that the majority of reviews in certain Amazon product categories are fraudulent or paid. Companies hire professional reviewers or robots to post glowing reviews to themselves or attack their competitors. My project uses 100G of Amazon reviews data to detect potential fake accounts on Amazon and gives warning to them when they are reading the reviews so that shoppers will think twice before buying the product.
+![](./img/app.png)
 
 
 ## Pipeline:
