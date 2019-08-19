@@ -156,7 +156,7 @@ def update_data(id, new_reviews, new_count, session, table):
                 similarity.append(float(sim))
             reviews.append(new_review.tolist())
         count += new_count
-        fake = vote(similarity, count, 0.8)
+        fake = vote(similarity, count, 0.9)
         session.execute(
             """
             UPDATE {} SET count={}, fake={}, review={}, similarity={} WHERE user_id='{}';
@@ -174,7 +174,7 @@ def main(data_path):
     print("Spark jobs start")
 
     cass = cassandra_store.PythonCassandraExample(
-        host=["10.0.0.13, 10.0.0.7, 10.0.0.5"], keyspace="project")
+        host=config['cassandra_ip'], keyspace="project")
     cass.createsession()
 
     for cat in config['categories']:
