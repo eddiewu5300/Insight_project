@@ -14,11 +14,12 @@ from cassandra.cluster import Cluster
 import dash_table
 import glob
 from pathlib import Path
+from config.config import *
 
 
 
 def connect_cassandra_cluster():
-    cluster = Cluster(['10.0.0.13','10.0.0.7','10.0.0.5'])
+    cluster = Cluster(config['cassandra_ip'])
     session = cluster.connect('project')
     return session
     
@@ -82,7 +83,6 @@ def generate_table(input_text, table, session):
     return html.Table(
         # Header
         [html.Tr([html.Th(col) for col in df.columns])] +
-
         # Body
         [html.Tr([
             html.Td(df.iloc[i][col]) for col in df.columns

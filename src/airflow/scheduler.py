@@ -1,6 +1,8 @@
 from airflow import DAG
 from airflow.operators.bash_operator import BashOperator
 from datetime import timedelta, datetime
+from config.config import *
+
 default_args = {
     'owner': 'airflow',
     'depends_on_past': False,
@@ -11,12 +13,12 @@ default_args = {
     'email_on_retry': False,
     'retries': 2,
     'retry_delay': timedelta(minutes=5),
-
 }
+
 dag = DAG('bash_test', default_args=default_args,
           schedule_interval=timedelta(days=1))
 user = 'ubuntu'
-host = 'ec2-3-214-12-177.compute-1.amazonaws.com'
+host = config['airflow_host']
 command = "bash spark-submit --conf spark.cassandra.connection.host='10.0.0.13, 10.0.0.7, 10.0.0.5'\
             --master spark://ip-10-0-0-11:7077\
             --conf spark.executor.memoryOverhead=600\
