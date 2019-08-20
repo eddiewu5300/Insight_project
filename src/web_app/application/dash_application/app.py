@@ -15,8 +15,14 @@ import dash_table
 import glob
 from pathlib import Path
 from config.config import *
+import logging
 
-
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.info)
+formatter = logging.Formatter('%(asctime)s:%(levelname)s:%(message)s')
+file_handler = logging.FileHandler('app.log')
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
 
 def connect_cassandra_cluster():
     cluster = Cluster(config['cassandra_ip'])
@@ -41,7 +47,7 @@ def get_data(input_text, table, session):
     try:
         data = session.execute(command)
     except:
-        print("Error while connecting to Cassandra")
+        logger.error("Error while connecting to Cassandra")
         data = [[]]
     return data
     
