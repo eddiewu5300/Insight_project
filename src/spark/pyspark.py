@@ -6,7 +6,6 @@ from pyspark.ml.feature import Tokenizer
 from pyspark.ml.feature import StopWordsRemover
 from pyspark.sql.types import *
 from collections import Counter
-import logging
 from gensim.models.keyedvectors import KeyedVectors
 from nltk.stem import WordNetLemmatizer
 import wikiwords
@@ -21,6 +20,14 @@ import numpy as np
 from itertools import combinations
 from cassandra import cassandra_store
 from config.config import *
+import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.info)
+formatter = logging.Formatter('%(asctime)s:%(levelname)s:%(message)s')
+file_handler = logging.FileHandler('spark_job.log')
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
 
 
 def load_model(sc):
@@ -28,11 +35,11 @@ def load_model(sc):
     Load global Vec model
     """
     now = datetime.datetime.now()
-    print('loading model')
+    logger.info('loading model')
     model = KeyedVectors.load_word2vec_format(
         'glove.6B.50d.txt.word2vec', binary=False)
-    print('model loading time')
-    print(str(datetime.datetime.now()-now) + 'sec')
+    logger.info('model loading time')
+    logger.info(str(datetime.datetime.now()-now) + 'sec')
     model_broadcast = sc.broadcast(model)
     return model
 
@@ -66,6 +73,7 @@ def get_word2vec(sentence, model):
         try:
             vec = model.wv[tmp]
         except:
+            logger.warning('{} - Failed to convert to wordvector'.format(tmp))
             vec = np.repeat(0.0, 50)
         vec_.append(vec)
     return vec_
@@ -80,8 +88,13 @@ def get_tfidf(sentence):
     tfidf_ = []
     for idx in range(len(sentence)):
         w = sentence[idx]
-        tfidf = 0.1 * math.log(wikiwords.N * wikiwords.freq(w.lower()) + 10)
-        tfidf = float('%.2f' % tfidf)
+        try:
+            tfidf = 0.1 * math.log(wikiwords.N *
+                                   wikiwords.freq(w.lower()) + 10)
+            tfidf = float('%.2f' % tfidf)
+        except:
+            logger.warning('{} - Failed to get to tfidf'.format(w.lower))
+            tfidf = 0.0
         tfidf_.append(tfidf)
     return tfidf_
 
@@ -133,17 +146,18 @@ def main(data_path):
     sc = SparkContext()
     spark = SparkSession(sc)
     model = load_model(sc)
-    print('#'*100)
-    print("Spark jobs start")
+    logger.info("Spark jobs start")
 
-    cass = cassandra_store.PythonCassandraExample(
-        host=config['cassandra_ip'], keyspace=config['cassandra_keyspace'])
-    cass.createsession()
+    try:
+        cass = cassandra_store.PythonCassandraExample(
+            host=config['cassandra_ip'], keyspace=config['cassandra_keyspace'])
+        cass.createsession()
+    except:
+        logger.error("Cannot connect to Cassandra")
 
     categories = config['contegories']
     for cat in categories:
-        print("*"*100)
-        print('Processing ' + cat)
+        logger.info('Processing {}'.format(cat))
         path = data_path + 'product_category=' + str(cat) + '/*.parquet'
         reviews = spark.read.parquet(path)
 
@@ -156,18 +170,17 @@ def main(data_path):
         lower_case = udf(lambda string: string.lower(), StringType())
         df4 = df3.withColumn("product_title", lower_case('product_title'))
 
-        print('#'*100)
-        print('creating raw review table')
+        logger.info('creating raw review table')
         cat1 = cat.lower().replace('&', '') + '_review'
         cass.create_text_tables(cat1)
-        print('creating index')
+        logger.info('creating index')
         cass.create_text_index(cat1)
 
         df4.write.format("org.apache.spark.sql.cassandra")\
             .mode('append')\
             .options(table=cat1, keyspace="project")\
             .save()
-        print('Review Data Stored in Cassandra')
+        logger.info('Review Data Stored in Cassandra')
 
         ##########################################################
         # process fake account information
@@ -217,14 +230,13 @@ def main(data_path):
             ls, lit("count"), treshold=0.9), BooleanType())
         vote_df = sim_df.withColumn("fake", voter("similartity"))
 
-        print('#'*100)
-        print('writing data into Cassandra')
+        logger.info('writing data into Cassandra')
         cat = cat.lower().replace('&', '')
         vote_df.write.format("org.apache.spark.sql.cassandra")\
             .mode('append')\
             .options(table=cat, keyspace="project")\
             .save()
-        print('Data Stored in Cassandra')
+        logger.info('Data Stored in Cassandra')
 
 
 if __name__ == "__main__":

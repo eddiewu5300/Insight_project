@@ -5,7 +5,6 @@ from pyspark import SparkContext
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import collect_set, collect_list, count, udf, concat, col, lit
 from collections import Counter
-import logging
 from gensim.models.keyedvectors import KeyedVectors
 from pyspark.ml.feature import StopWordsRemover
 from nltk.stem import WordNetLemmatizer
@@ -25,18 +24,26 @@ import numpy as np
 from itertools import combinations
 from cassandra import cassandra_store
 from config.cofig import *
+import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.info)
+formatter = logging.Formatter('%(asctime)s:%(levelname)s:%(message)s')
+file_handler = logging.FileHandler('daily_job.log')
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
 
 
 def load_model(sc):
     """
-    Load word2vec model
+    Load global Vec model
     """
     now = datetime.datetime.now()
-    print('loading model')
+    logger.info('loading model')
     model = KeyedVectors.load_word2vec_format(
         'glove.6B.50d.txt.word2vec', binary=False)
-    print('model loading time')
-    print(str(datetime.datetime.now()-now) + 'sec')
+    logger.info('model loading time')
+    logger.info(str(datetime.datetime.now()-now) + 'sec')
     model_broadcast = sc.broadcast(model)
     return model
 
@@ -70,6 +77,7 @@ def get_word2vec(sentence, model):
         try:
             vec = model.wv[tmp]
         except:
+            logger.warning('{} - Failed to convert to wordvector'.format(tmp))
             vec = np.repeat(0.0, 50)
         vec_.append(vec)
     return vec_
@@ -84,8 +92,13 @@ def get_tfidf(sentence):
     tfidf_ = []
     for idx in range(len(sentence)):
         w = sentence[idx]
-        tfidf = 0.1 * math.log(wikiwords.N * wikiwords.freq(w.lower()) + 10)
-        tfidf = float('%.2f' % tfidf)
+        try:
+            tfidf = 0.1 * math.log(wikiwords.N *
+                                   wikiwords.freq(w.lower()) + 10)
+            tfidf = float('%.2f' % tfidf)
+        except:
+            logger.warning('{} - Failed to get to tfidf'.format(w.lower))
+            tfidf = 0.0
         tfidf_.append(tfidf)
     return tfidf_
 
@@ -170,16 +183,17 @@ def main(data_path):
     model = load_model(sc)
     # Preload stop words
     stop = set(stopwords.words('english'))
-    print('#'*100)
-    print("Spark jobs start")
+    logger.info("Spark jobs start")
 
-    cass = cassandra_store.PythonCassandraExample(
-        host=config['cassandra_ip'], keyspace="project")
-    cass.createsession()
+    try:
+        cass = cassandra_store.PythonCassandraExample(
+            host=config['cassandra_ip'], keyspace=config['cassandra_keyspace'])
+        cass.createsession()
+    except:
+        logger.error("Cannot connect to Cassandra")
 
     for cat in config['categories']:
-        print("*"*100)
-        print('Processing ' + cat)
+        logger.info('Processing {}'.format(cat))
         path = data_path + 'new_reviews' + str(cat) + '/*.parquet'
         new_reviews = spark.read.parquet(path)
 
@@ -221,8 +235,8 @@ def main(data_path):
             reviews = user_review[1][0]
             count = user_review[1][1]
             update_data(id, reviews, count, cass, cat)
-        print(str(cat)+' table update completed')
-    print('Database update completed')
+        logger.info('{} table update completed'.format(cat))
+    logger.info('Database update completed')
     #review_rdd.map(lambda x: update_data(x[0], x[1][0], x[1][1], session))
 
 

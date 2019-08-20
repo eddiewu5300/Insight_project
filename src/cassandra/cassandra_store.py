@@ -8,6 +8,13 @@ import logging
 from cassandra.cluster import Cluster
 from config.config import *
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.info)
+formatter = logging.Formatter('%(asctime)s:%(levelname)s:%(message)s')
+file_handler = logging.FileHandler('cassandra.log')
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+
 
 class PythonCassandra:
 
@@ -23,7 +30,7 @@ class PythonCassandra:
     def createsession(self):
         self.cluster = Cluster(self.host)
         self.session = self.cluster.connect(self.keyspace)
-        print("Session Created!")
+        logger.info("Session Created!")
 
     def getsession(self):
         return self.session
@@ -39,19 +46,19 @@ class PythonCassandra:
             "SELECT keyspace_name FROM system_schema.keyspaces")
         if keyspace in [row[0] for row in rows]:
             if drop:
-                print("dropping existing keyspace...")
+                logger.info("dropping existing keyspace...")
                 self.session.execute("DROP KEYSPACE " + keyspace)
             else:
-                print("existing keyspace, not doing anything...")
+                logger.info("existing keyspace, not doing anything...")
                 return
 
-        print("creating keyspace...")
+        logger.info("creating keyspace...")
         self.session.execute("""
                 CREATE KEYSPACE %s
                 WITH replication = { 'class': 'SimpleStrategy', 'replication_factor': '2' }
                 """ % keyspace)
 
-        print("setting keyspace...")
+        logger.info("setting keyspace...")
         self.session.set_keyspace(keyspace)
 
     def create_tables(self, table):
@@ -64,7 +71,7 @@ class PythonCassandra:
                 similarity list<float>);
                 """.format(str(table))
         self.session.execute(c_sql)
-        print(str(table)+" Table Created !!!")
+        logger.info("{} Table Created !!!".format(table))
 
     def create_text_tables(self, table):
         c_sql = """
@@ -78,7 +85,7 @@ class PythonCassandra:
             );
             """.format(str(table))
         self.session.execute(c_sql)
-        print(str(table)+" Text Table Created !!!")
+        logger.info("{} Text Table Created !!!".format(table))
 
     def create_text_index(self, table):
         c_sql = """
@@ -90,4 +97,4 @@ class PythonCassandra:
         'case_sensitive': 'false'};
         """.format(str(table))
         self.session.execute(c_sql)
-        print(str(table)+" Text Index Created !!!")
+        logger.info("{} Text Index Created !!!".format(table))
