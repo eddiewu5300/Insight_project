@@ -15,7 +15,7 @@ default_args = {
     'retry_delay': timedelta(minutes=5),
 }
 
-dag = DAG('bash_test', default_args=default_args,
+dag = DAG('spark_job', default_args=default_args,
           schedule_interval=timedelta(days=1))
 user = 'ubuntu'
 host = config['airflow_host']

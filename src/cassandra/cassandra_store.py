@@ -9,7 +9,7 @@ from cassandra.cluster import Cluster
 from config.config import *
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.info)
+logger.setLevel("INFO")
 formatter = logging.Formatter('%(asctime)s:%(levelname)s:%(message)s')
 file_handler = logging.FileHandler('cassandra.log')
 file_handler.setFormatter(formatter)
