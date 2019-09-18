@@ -27,7 +27,7 @@ from config.cofig import *
 import logging
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.info)
+logger.setLevel("INFO")
 formatter = logging.Formatter('%(asctime)s:%(levelname)s:%(message)s')
 file_handler = logging.FileHandler('daily_job.log')
 file_handler.setFormatter(formatter)

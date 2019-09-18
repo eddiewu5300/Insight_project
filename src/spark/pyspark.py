@@ -23,7 +23,7 @@ from config.config import *
 import logging
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.info)
+logger.setLevel("INFO")
 formatter = logging.Formatter('%(asctime)s:%(levelname)s:%(message)s')
 file_handler = logging.FileHandler('spark_job.log')
 file_handler.setFormatter(formatter)
